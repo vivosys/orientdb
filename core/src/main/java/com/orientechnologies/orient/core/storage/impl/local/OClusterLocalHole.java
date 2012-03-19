@@ -15,13 +15,15 @@
  */
 package com.orientechnologies.orient.core.storage.impl.local;
 
+import java.io.File;
 import java.io.IOException;
 
 import com.orientechnologies.common.log.OLogManager;
 import com.orientechnologies.orient.core.config.OStorageFileConfiguration;
+import com.orientechnologies.orient.core.memory.OMemoryWatchDog;
 
 /**
- * Handle the holes inside cluster segments. The synchronization is in charge to the OClusterLocal instance.<br/>
+ * Handles the holes inside cluster segments. The synchronization is in charge to the OClusterLocal instance.<br/>
  * <br/>
  * Record structure:<br/>
  * <br/>
@@ -70,14 +72,14 @@ public class OClusterLocalHole extends OSingleFileSegment {
 		file.writeLong(position, iPosition);
 
 		if (OLogManager.instance().isDebugEnabled())
-			OLogManager.instance().debug(this, "Pushed new hole at #%d containing the position #%d:%d", position / RECORD_SIZE,
+			OLogManager.instance().debug(this, "Pushed new hole %s/#%d -> #%d:%d", owner.getName(), position / RECORD_SIZE,
 					owner.getId(), iPosition);
 
 		return position;
 	}
 
 	/**
-	 * Return the recycled position if any.
+	 * Returns and remove the recycled position if any.
 	 * 
 	 * @return the recycled position if found, otherwise -1 that usually means to request more space.
 	 * @throws IOException
@@ -89,7 +91,7 @@ public class OClusterLocalHole extends OSingleFileSegment {
 
 			if (recycledPosition > -1) {
 				if (OLogManager.instance().isDebugEnabled())
-					OLogManager.instance().debug(this, "Recycling hole #%d containing the position #%d:%d", pos, owner.getId(),
+					OLogManager.instance().debug(this, "Recycled hole %s/#%d -> #%d:%d", owner.getName(), pos, owner.getId(),
 							recycledPosition);
 
 				// SHRINK THE FILE
@@ -103,7 +105,17 @@ public class OClusterLocalHole extends OSingleFileSegment {
 	}
 
 	/**
-	 * Remove a hole. Called on transaction recover to invalidate a delete for a record. Try to shrink the file if the invalidated
+	 * Returns the recycled position if any.
+	 * 
+	 * @return the recycled position if found, otherwise -1 that usually means to request more space.
+	 * @throws IOException
+	 */
+	public long getEntryPosition(final int iPosition) throws IOException {
+		return file.readLong(iPosition * RECORD_SIZE);
+	}
+
+	/**
+	 * Removes a hole. Called on transaction recover to invalidate a delete for a record. Try to shrink the file if the invalidated
 	 * entry is not in the middle of valid entries.
 	 * 
 	 * @param iPosition
@@ -111,7 +123,7 @@ public class OClusterLocalHole extends OSingleFileSegment {
 	 * @return
 	 * @throws IOException
 	 */
-	public boolean removeEntryWithPosition(long iPosition) throws IOException {
+	public boolean removeEntryWithPosition(final long iPosition) throws IOException {
 		// BROWSE IN ASCENDING ORDER UNTIL THE REQUESTED POSITION IS FOUND
 		boolean canShrink = true;
 		for (int pos = getHoles() - 1; pos >= 0; --pos) {
@@ -136,8 +148,21 @@ public class OClusterLocalHole extends OSingleFileSegment {
 		return false;
 	}
 
+	public void rename(String iOldName, String iNewName) {
+		final String osFileName = file.getName();
+		if (osFileName.startsWith(iOldName)) {
+			final File newFile = new File(storage.getStoragePath() + "/" + iNewName
+					+ osFileName.substring(osFileName.lastIndexOf(iOldName) + iOldName.length()));
+			boolean renamed = file.renameTo(newFile);
+			while (!renamed) {
+				OMemoryWatchDog.freeMemory(100);
+				renamed = file.renameTo(newFile);
+			}
+		}
+	}
+
 	/**
-	 * Compute the number of holes. Note that not all the holes could be valid.
+	 * Computes the number of holes. Note that not all the holes could be valid.
 	 * 
 	 * @return
 	 */

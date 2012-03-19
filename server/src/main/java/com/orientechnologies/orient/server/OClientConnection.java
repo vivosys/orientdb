@@ -16,21 +16,38 @@
 package com.orientechnologies.orient.server;
 
 import java.io.IOException;
-import java.net.Socket;
+import java.net.InetSocketAddress;
+import java.util.ArrayList;
+import java.util.List;
 
 import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
+import com.orientechnologies.orient.core.db.raw.ODatabaseRaw;
+import com.orientechnologies.orient.core.record.ORecordInternal;
+import com.orientechnologies.orient.enterprise.channel.binary.OChannelBinary;
 import com.orientechnologies.orient.server.network.protocol.ONetworkProtocol;
+import com.orientechnologies.orient.server.network.protocol.ONetworkProtocolData;
 
 public class OClientConnection {
-	public String								id;
-	public ONetworkProtocol			protocol;
-	public long									since;
-	public ODatabaseDocumentTx	database;
+	public int											id;
+	public ONetworkProtocol					protocol;
+	public long											since;
+	public ODatabaseDocumentTx			database;
+	public ODatabaseRaw							rawDatabase;
+	public ONetworkProtocolData			data					= new ONetworkProtocolData();
+	public List<ORecordInternal<?>>	records2Push	= new ArrayList<ORecordInternal<?>>();
 
-	public OClientConnection(final int iId, final Socket iSocket, final ONetworkProtocol iProtocol) throws IOException {
-		this.id = String.valueOf(iId);
+	public OClientConnection(final int iId, final ONetworkProtocol iProtocol) throws IOException {
+		this.id = iId;
 		this.protocol = iProtocol;
 		this.since = System.currentTimeMillis();
+	}
+
+	public void close() {
+		if (database != null) {
+			database.close();
+			database = null;
+		}
+		records2Push.clear();
 	}
 
 	@Override
@@ -40,9 +57,17 @@ public class OClientConnection {
 				+ ", since=" + since + "]";
 	}
 
+	/**
+	 * Returns the remote network address in the format <ip>:<port>.
+	 */
+	public String getRemoteAddress() {
+		final InetSocketAddress remoteAddress = (InetSocketAddress) protocol.getChannel().socket.getRemoteSocketAddress();
+		return remoteAddress.getAddress().getHostAddress() + ":" + remoteAddress.getPort();
+	}
+
 	@Override
 	public int hashCode() {
-		return id.hashCode();
+		return id;
 	}
 
 	@Override
@@ -53,9 +78,17 @@ public class OClientConnection {
 			return false;
 		if (getClass() != obj.getClass())
 			return false;
-		OClientConnection other = (OClientConnection) obj;
+		final OClientConnection other = (OClientConnection) obj;
 		if (id != other.id)
 			return false;
 		return true;
+	}
+
+	public OChannelBinary getChannel() {
+		return (OChannelBinary) protocol.getChannel();
+	}
+
+	public ONetworkProtocol getProtocol() {
+		return protocol;
 	}
 }

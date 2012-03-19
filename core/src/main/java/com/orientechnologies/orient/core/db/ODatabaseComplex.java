@@ -15,13 +15,24 @@
  */
 package com.orientechnologies.orient.core.db;
 
+import java.util.List;
+import java.util.Set;
+
 import com.orientechnologies.orient.core.command.OCommandRequest;
 import com.orientechnologies.orient.core.db.object.ODatabaseObject;
 import com.orientechnologies.orient.core.db.record.ODatabaseRecord;
+import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.dictionary.ODictionary;
+import com.orientechnologies.orient.core.exception.OTransactionException;
+import com.orientechnologies.orient.core.hook.ORecordHook;
+import com.orientechnologies.orient.core.hook.ORecordHook.TYPE;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.metadata.OMetadata;
+import com.orientechnologies.orient.core.metadata.security.OSecurity;
+import com.orientechnologies.orient.core.metadata.security.OUser;
+import com.orientechnologies.orient.core.query.OQuery;
 import com.orientechnologies.orient.core.storage.OStorage;
+import com.orientechnologies.orient.core.tx.OTransaction;
 import com.orientechnologies.orient.core.tx.OTransaction.TXTYPE;
 
 /**
@@ -37,13 +48,30 @@ import com.orientechnologies.orient.core.tx.OTransaction.TXTYPE;
  * @param <T>
  */
 public interface ODatabaseComplex<T extends Object> extends ODatabase, OUserObject2RecordHandler {
+	public enum OPERATION_MODE {
+		SYNCHRONOUS, ASYNCHRONOUS
+	}
 
 	/**
 	 * Creates a new entity instance.
 	 * 
 	 * @return The new instance.
 	 */
-	public T newInstance();
+	public <RET extends Object> RET newInstance();
+
+	/**
+	 * Returns the Dictionary manual index.
+	 * 
+	 * @return ODictionary instance
+	 */
+	public ODictionary<T> getDictionary();
+
+	/**
+	 * Returns the current user logged into the database.
+	 * 
+	 * @see OSecurity
+	 */
+	public OUser getUser();
 
 	/**
 	 * Loads the entity and return it.
@@ -52,7 +80,43 @@ public interface ODatabaseComplex<T extends Object> extends ODatabase, OUserObje
 	 *          The entity to load. If the entity was already loaded it will be reloaded and all the changes will be lost.
 	 * @return
 	 */
-	public T load(final T iObject);
+	public <RET extends T> RET load(T iObject);
+
+	/**
+	 * Loads a record using a fetch plan.
+	 * 
+	 * @param iDocument
+	 *          Record to load
+	 * @param iFetchPlan
+	 *          Fetch plan used
+	 * @return The record received
+	 */
+	public <RET extends T> RET load(T iObject, String iFetchPlan);
+
+	/**
+	 * Loads a record using a fetch plan.
+	 * 
+	 * @param iDocument
+	 *          Record to load
+	 * @param iFetchPlan
+	 *          Fetch plan used
+	 * @param iIgnoreCache
+	 *          Ignore cache or use it
+	 * @return The record received
+	 */
+	public <RET extends T> RET load(T iObject, String iFetchPlan, boolean iIgnoreCache);
+
+	/**
+	 * Force the reloading of the entity.
+	 * 
+	 * @param iObject
+	 *          The entity to load. If the entity was already loaded it will be reloaded and all the changes will be lost.
+	 * @param iFetchPlan
+	 *          Fetch plan used
+	 * @param iIgnoreCache
+	 *          Ignore cache or use it
+	 */
+	public void reload(final T iObject, String iFetchPlan, boolean iIgnoreCache);
 
 	/**
 	 * Loads the entity by the Record ID.
@@ -61,11 +125,35 @@ public interface ODatabaseComplex<T extends Object> extends ODatabase, OUserObje
 	 *          The unique record id of the entity to load.
 	 * @return
 	 */
-	public T load(final ORID iRecordId);
+	public <RET extends T> RET load(ORID iRecordId);
 
 	/**
-	 * Saves an entity. If the entity is not dirty, then the operation will be ignored. For custom entity implementations assure to
-	 * set the entity as dirty.
+	 * Loads the entity by the Record ID using a fetch plan.
+	 * 
+	 * @param iRecordId
+	 *          The unique record id of the entity to load.
+	 * @param iFetchPlan
+	 *          Fetch plan used
+	 * @return
+	 */
+	public <RET extends T> RET load(ORID iRecordId, String iFetchPlan);
+
+	/**
+	 * Loads the entity by the Record ID using a fetch plan and specifying if the cache must be ignored.
+	 * 
+	 * @param iRecordId
+	 *          The unique record id of the entity to load.
+	 * @param iFetchPlan
+	 *          Fetch plan used
+	 * @param iIgnoreCache
+	 *          Ignore cache or use it
+	 * @return
+	 */
+	public <RET extends T> RET load(ORID iRecordId, String iFetchPlan, boolean iIgnoreCache);
+
+	/**
+	 * Saves an entity in synchronous mode. If the entity is not dirty, then the operation will be ignored. For custom entity
+	 * implementations assure to set the entity as dirty.
 	 * 
 	 * @param iObject
 	 *          The entity to save
@@ -74,8 +162,20 @@ public interface ODatabaseComplex<T extends Object> extends ODatabase, OUserObje
 	public ODatabaseComplex<T> save(T iObject);
 
 	/**
-	 * Saves an entity in the specified cluster. If the entity is not dirty, then the operation will be ignored. For custom entity
-	 * implementations assure to set the entity as dirty. If the cluster doesn't exist, an error will be thrown.
+	 * Saves an entity specifying the mode. If the entity is not dirty, then the operation will be ignored. For custom entity
+	 * implementations assure to set the entity as dirty. If the cluster does not exist, an error will be thrown.
+	 * 
+	 * @param iObject
+	 *          The entity to save
+	 * @param iMode
+	 *          Mode of save: synchronous (default) or asynchronous
+	 * @return The Database instance itself giving a "fluent interface". Useful to call multiple methods in chain.
+	 */
+	public ODatabaseComplex<T> save(T iObject, OPERATION_MODE iMode);
+
+	/**
+	 * Saves an entity in the specified cluster in synchronous mode. If the entity is not dirty, then the operation will be ignored.
+	 * For custom entity implementations assure to set the entity as dirty. If the cluster does not exist, an error will be thrown.
 	 * 
 	 * @param iObject
 	 *          The entity to save
@@ -86,13 +186,43 @@ public interface ODatabaseComplex<T extends Object> extends ODatabase, OUserObje
 	public ODatabaseComplex<T> save(T iObject, String iClusterName);
 
 	/**
-	 * Deletes an entity from the database.
+	 * Saves an entity in the specified cluster specifying the mode. If the entity is not dirty, then the operation will be ignored.
+	 * For custom entity implementations assure to set the entity as dirty. If the cluster does not exist, an error will be thrown.
+	 * 
+	 * @param iObject
+	 *          The entity to save
+	 * @param iClusterName
+	 *          Name of the cluster where to save
+	 * @param iMode
+	 *          Mode of save: synchronous (default) or asynchronous
+	 * @return The Database instance itself giving a "fluent interface". Useful to call multiple methods in chain.
+	 */
+	public ODatabaseComplex<T> save(T iObject, String iClusterName, OPERATION_MODE iMode);
+
+	/**
+	 * Deletes an entity from the database in synchronous mode.
 	 * 
 	 * @param iObject
 	 *          The entity to delete.
 	 * @return The Database instance itself giving a "fluent interface". Useful to call multiple methods in chain.
 	 */
 	public ODatabaseComplex<T> delete(T iObject);
+
+	/**
+	 * Deletes the entity with the received RID from the database.
+	 * 
+	 * @param iRID
+	 *          The RecordID to delete.
+	 * @return The Database instance itself giving a "fluent interface". Useful to call multiple methods in chain.
+	 */
+	public ODatabaseComplex<T> delete(ORID iRID);
+
+	/**
+	 * Return active transaction. Cannot be null. If no transaction is active, then a OTransactionNoTx instance is returned.
+	 * 
+	 * @return OTransaction implementation
+	 */
+	public OTransaction getTransaction();
 
 	/**
 	 * Begins a new transaction. By default the type is OPTIMISTIC. If a previous transaction was started it will be rollbacked and
@@ -113,13 +243,20 @@ public interface ODatabaseComplex<T extends Object> extends ODatabase, OUserObje
 	public ODatabaseComplex<T> begin(TXTYPE iStatus);
 
 	/**
+	 * Attaches a transaction as current.
+	 * 
+	 * @return The Database instance itself giving a "fluent interface". Useful to call multiple methods in chain.
+	 */
+	public ODatabaseComplex<T> begin(OTransaction iTx) throws OTransactionException;
+
+	/**
 	 * Commits the current transaction. The approach is all or nothing. All changes will be permanent following the storage type. If
 	 * the operation succeed all the entities changed inside the transaction context will be effectives. If the operation fails, all
 	 * the changed entities will be restored in the datastore. Memory instances are not guaranteed to being restored as well.
 	 * 
 	 * @return
 	 */
-	public ODatabaseComplex<T> commit();
+	public ODatabaseComplex<T> commit() throws OTransactionException;
 
 	/**
 	 * Aborts the current running transaction. All the pending changed entities will be restored in the datastore. Memory instances
@@ -127,7 +264,18 @@ public interface ODatabaseComplex<T extends Object> extends ODatabase, OUserObje
 	 * 
 	 * @return
 	 */
-	public ODatabaseComplex<T> rollback();
+	public ODatabaseComplex<T> rollback() throws OTransactionException;
+
+	/**
+	 * Execute a query against the database.
+	 * 
+	 * @param iCommand
+	 *          Query command
+	 * @param iArgs
+	 *          Optional parameters to bind to the query
+	 * @return List of POJOs
+	 */
+	public <RET extends List<?>> RET query(final OQuery<?> iCommand, final Object... iArgs);
 
 	/**
 	 * Execute a command against the database. A command can be a SQL statement or a Procedure. If the OStorage used is remote
@@ -141,18 +289,11 @@ public interface ODatabaseComplex<T extends Object> extends ODatabase, OUserObje
 	public <RET extends OCommandRequest> RET command(OCommandRequest iCommand);
 
 	/**
-	 * Return the OMetadata instance. Can't be null.
+	 * Return the OMetadata instance. Cannot be null.
 	 * 
 	 * @return The OMetadata instance.
 	 */
 	public OMetadata getMetadata();
-
-	/**
-	 * Return the database dictionary. Can't be null.
-	 * 
-	 * @return The ODictionary instance.
-	 */
-	public ODictionary<T> getDictionary();
 
 	/**
 	 * Returns the database owner. Used in wrapped instances to know the up level ODatabase instance.
@@ -162,7 +303,7 @@ public interface ODatabaseComplex<T extends Object> extends ODatabase, OUserObje
 	public ODatabaseComplex<?> getDatabaseOwner();
 
 	/**
-	 * Internal. Set the database owner.
+	 * Internal. Sets the database owner.
 	 */
 	public ODatabaseComplex<?> setDatabaseOwner(ODatabaseComplex<?> iOwner);
 
@@ -172,4 +313,65 @@ public interface ODatabaseComplex<T extends Object> extends ODatabase, OUserObje
 	 * @return The underlying ODatabase implementation.
 	 */
 	public <DB extends ODatabase> DB getUnderlying();
+
+	/**
+	 * Internal method. Don't call it directly unless you're building an internal component.
+	 */
+	public void setInternal(ATTRIBUTES attribute, Object iValue);
+
+	/**
+	 * Registers a hook to listen all events for Records.
+	 * 
+	 * @param iHookImpl
+	 *          ORecordHook implementation
+	 * @return The Database instance itself giving a "fluent interface". Useful to call multiple methods in chain.
+	 */
+	public <DB extends ODatabaseComplex<?>> DB registerHook(ORecordHook iHookImpl);
+
+	/**
+	 * Retrieves all the registered hooks.
+	 * 
+	 * @return A not-null unmodifiable set of ORecordHook instances. If there are no hooks registered, the Set is empty.
+	 */
+	public Set<ORecordHook> getHooks();
+
+	/**
+	 * Unregisters a previously registered hook.
+	 * 
+	 * @param iHookImpl
+	 *          ORecordHook implementation
+	 * @return The Database instance itself giving a "fluent interface". Useful to call multiple methods in chain.
+	 */
+	public <DB extends ODatabaseComplex<?>> DB unregisterHook(ORecordHook iHookImpl);
+
+	/**
+	 * Invokes the callback on all the configured hooks.
+	 * 
+	 * @param iObject
+	 *          The object passed change based on the Database implementation: records for {@link ODatabaseRecord} implementations and
+	 *          POJO for {@link ODatabaseObject} implementations.
+	 * @return True if the input record is changed, otherwise false
+	 */
+	public boolean callbackHooks(TYPE iType, OIdentifiable iObject);
+
+	/**
+	 * Returns if the Multi Version Concurrency Control is enabled or not. If enabled the version of the record is checked before each
+	 * update and delete against the records.
+	 * 
+	 * @return true if enabled, otherwise false
+	 * @see ODatabaseRecord#setMVCC(boolean)
+	 */
+	public boolean isMVCC();
+
+	/**
+	 * Enables or disables the Multi-Version Concurrency Control. If enabled the version of the record is checked before each update
+	 * and delete against the records.
+	 * 
+	 * @param iValue
+	 * @see ODatabaseRecord#isMVCC()
+	 * @return The Database instance itself giving a "fluent interface". Useful to call multiple methods in chain.
+	 */
+	public <DB extends ODatabaseComplex<?>> DB setMVCC(boolean iValue);
+
+	public String getType();
 }

@@ -19,7 +19,6 @@ import java.io.IOException;
 import java.lang.reflect.Constructor;
 
 import com.orientechnologies.common.log.OLogManager;
-import com.orientechnologies.orient.core.db.record.ODatabaseRecord;
 import com.orientechnologies.orient.core.exception.OSerializationException;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.id.ORecordId;
@@ -34,15 +33,9 @@ import com.orientechnologies.orient.core.serialization.OBinaryProtocol;
  * @author Luca Garulli
  * 
  */
-public class OStreamSerializerAnyRecord extends OStreamSerializerAbstract {
-	public static final String										NAME	= "ar";
-
-	private ODatabaseRecord<? extends ORecord<?>>	database;
-
-	public OStreamSerializerAnyRecord(ODatabaseRecord<? extends ORecord<?>> iDatabase) throws SecurityException,
-			NoSuchMethodException {
-		database = iDatabase;
-	}
+public class OStreamSerializerAnyRecord implements OStreamSerializer {
+	public static final String											NAME			= "ar";
+	public static final OStreamSerializerAnyRecord	INSTANCE	= new OStreamSerializerAnyRecord();
 
 	/**
 	 * Re-Create any object if the class has a public constructor that accepts a String as unique parameter.
@@ -58,27 +51,28 @@ public class OStreamSerializerAnyRecord extends OStreamSerializerAbstract {
 
 		try {
 			final StringBuilder content = new StringBuilder();
-			cls = readRecordType(stream, content);
+			cls = OStreamSerializerHelper.readRecordType(stream, content);
 
 			// TRY WITH THE DATABASE CONSTRUCTOR
 			for (Constructor<?> c : cls.getDeclaredConstructors()) {
 				Class<?>[] params = c.getParameterTypes();
 
-				if (params.length == 2 && params[0].isAssignableFrom(database.getClass()) && params[1].equals(ORID.class)) {
-					ORecord<?> rec = (ORecord<?>) c.newInstance(database, new ORecordId(content.toString()));
-					rec.load();
+				if (params.length == 2 && params[1].equals(ORID.class)) {
+					ORecord<?> rec = (ORecord<?>) c.newInstance(new ORecordId(content.toString()));
+					// rec.load();
 					return rec;
 				}
 			}
 		} catch (Exception e) {
-			OLogManager.instance().exception("Error on unmarshalling content. Class %s", e, OSerializationException.class, cls.getName());
+			OLogManager.instance().exception("Error on unmarshalling content. Class %s", e, OSerializationException.class,
+					cls != null ? cls.getName() : "?");
 		}
 
 		OLogManager
 				.instance()
 				.exception(
-						"Can'r unmarshall the record since the serialized object of class %s has no a constructor with right parameters: %s(%s, ORID)",
-						null, OSerializationException.class, cls.getSimpleName(), cls.getSimpleName(), database.getClass().getSimpleName());
+						"Cannot unmarshall the record since the serialized object of class %s has no constructor with suitable parameters: %s(ORID)",
+						null, OSerializationException.class, cls != null ? cls.getSimpleName() : "?", cls != null ? cls.getSimpleName() : "?");
 
 		return null;
 	}
@@ -88,9 +82,9 @@ public class OStreamSerializerAnyRecord extends OStreamSerializerAbstract {
 			return null;
 
 		if (((ORecord<?>) iObject).getIdentity() == null)
-			throw new OSerializationException("Can't serialize record without identity. Store it before to serialize.");
+			throw new OSerializationException("Cannot serialize record without identity. Store it before serialization.");
 
-		final StringBuilder buffer = writeRecordType(iObject.getClass(), new StringBuilder());
+		final StringBuilder buffer = OStreamSerializerHelper.writeRecordType(iObject.getClass(), new StringBuilder());
 		buffer.append(((ORecord<?>) iObject).getIdentity().toString());
 
 		return OBinaryProtocol.string2bytes(buffer.toString());

@@ -15,130 +15,64 @@
  */
 package com.orientechnologies.orient.core.metadata.schema;
 
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 
-import com.orientechnologies.orient.core.db.record.ODatabaseRecord;
-import com.orientechnologies.orient.core.exception.OSchemaException;
-import com.orientechnologies.orient.core.record.ORecordAbstract;
-import com.orientechnologies.orient.core.record.impl.ORecordBytes;
-import com.orientechnologies.orient.core.record.impl.ORecordColumn;
+import com.orientechnologies.orient.core.id.ORID;
+import com.orientechnologies.orient.core.storage.OStorage;
+import com.orientechnologies.orient.core.type.ODocumentWrapper;
 
-public class OSchema extends ORecordBytes {
-	protected Map<String, OClass>	classesMap							= new LinkedHashMap<String, OClass>();
-	protected List<OClass>				classes									= new ArrayList<OClass>();
-	public static final int				CLASSES_RECORD_NUM			= 1;
-	private static final int			CURRENT_VERSION_NUMBER	= 1;
+public interface OSchema {
 
-	public OSchema(final ODatabaseRecord<?> iDatabaseOwner, final int schemaClusterId) {
-		super(iDatabaseOwner);
-		registerStandardClasses();
-	}
+	public int countClasses();
 
-	public Collection<OClass> classes() {
-		return Collections.unmodifiableCollection(classes);
-	}
+	public OClass createClass(final Class<?> iClass);
 
-	public OClass createClass(final String iClassName) {
-		int clusterId = database.getClusterIdByName(iClassName);
-		if (clusterId == -1)
-			// CREATE A NEW CLUSTER
-			clusterId = database.addLogicalCluster(iClassName, database.getDefaultClusterId());
+	public OClass createClass(final Class<?> iClass, final int iDefaultClusterId);
 
-		return createClass(iClassName, clusterId);
-	}
+	public OClass createClass(final String iClassName);
 
-	public OClass createClass(final String iClassName, final int iDefaultClusterId) {
-		return createClass(iClassName, new int[] { iDefaultClusterId }, iDefaultClusterId);
-	}
+	public OClass createClass(final String iClassName, final OClass iSuperClass);
 
-	public OClass createClass(final String iClassName, final int[] iClusterIds, final int iDefaultClusterId) {
-		String key = iClassName.toLowerCase();
+	public OClass createClass(final String iClassName, final OClass iSuperClass, final OStorage.CLUSTER_TYPE iType);
 
-		if (classesMap.containsKey(key))
-			throw new OSchemaException("Class " + iClassName + " already exists in current database");
+	public OClass createClass(final String iClassName, final int iDefaultClusterId);
 
-		OClass cls = new OClass(this, classesMap.size(), iClassName, iClusterIds, iDefaultClusterId);
-		classesMap.put(key, cls);
-		classes.add(cls);
+	public OClass createClass(final String iClassName, final OClass iSuperClass, final int iDefaultClusterId);
 
-		setDirty();
+	public OClass createClass(final String iClassName, final OClass iSuperClass, final int[] iClusterIds);
 
-		return cls;
-	}
+	public void dropClass(final String iClassName);
 
-	public boolean existsClass(final String iClassName) {
-		return classesMap.containsKey(iClassName.toLowerCase());
-	}
+	public <RET extends ODocumentWrapper> RET reload();
 
-	public OClass getClassById(final int iClassId) {
-		if (iClassId == -1)
-			return null;
+	public boolean existsClass(final String iClassName);
 
-		OClass cls = classes.get(iClassId);
+	public OClass getClass(final Class<?> iClass);
 
-		if (cls == null)
-			throw new OSchemaException("Class #" + iClassId + " was not found in current database");
+	/**
+	 * Returns the OClass instance by class name. If the class is not configured and the database has an entity manager with the
+	 * requested class as registered, then creates a schema class for it at the fly.
+	 * 
+	 * @param iClassName
+	 *          Name of the class to retrieve
+	 * @return
+	 */
+	public OClass getClass(final String iClassName);
 
-		return cls;
-	}
+	public OClass getOrCreateClass(final String iClassName);
 
-	public OClass getClass(final String iClassName) {
-		if( iClassName == null )
-			return null;
-		
-		return classesMap.get(iClassName.toLowerCase());
-	}
+	public Collection<OClass> getClasses();
 
-	public OSchema fromStream(final byte[] iStream) {
-		ORecordColumn record = new ORecordColumn().fromStream(iStream);
+	public void create();
 
-		// READ CURRENT SCHEMA VERSION
-		int schemaVersion = Integer.parseInt(record.next());
-		if (schemaVersion != CURRENT_VERSION_NUMBER) {
-			// HANDLE SCHEMA UPGRADE
-		}
+	public int getVersion();
 
-		// REGISTER ALL THE CLASSES
-		OClass cls;
-		int classesNum = Integer.parseInt(record.next());
-		for (int c = 0; c < classesNum; ++c) {
-			cls = new OClass(this, c, record.next(), null, -1);
-			classesMap.put(cls.getName().toLowerCase(), cls);
-			classes.add(cls);
-			cls.fromStream(record);
-		}
-		return this;
-	}
+	public ORID getIdentity();
 
-	public byte[] toStream() {
-		ORecordColumn record = new ORecordColumn();
-
-		// WRITE CURRENT SCHEMA VERSION
-		record.add(String.valueOf(CURRENT_VERSION_NUMBER));
-
-		// WRITE CLASSES
-		record.add(String.valueOf(classesMap.size()));
-		for (OClass cls : classesMap.values()) {
-			cls.toStream(record);
-		}
-
-		return record.toStream();
-	}
-
-	private void registerStandardClasses() {
-	}
-
-	public Collection<OClass> getClasses() {
-		return Collections.unmodifiableCollection(classesMap.values());
-	}
-
-	public ORecordAbstract<byte[]> load(final int schemaClusterId) {
-		setIdentity(schemaClusterId, CLASSES_RECORD_NUM);
-		return super.load();
-	}
+	/**
+	 * Do nothing. Starting from 1.0rc2 the schema is auto saved!
+	 * 
+	 * @COMPATIBILITY 1.0rc1
+	 */
+	public <RET extends ODocumentWrapper> RET save();
 }

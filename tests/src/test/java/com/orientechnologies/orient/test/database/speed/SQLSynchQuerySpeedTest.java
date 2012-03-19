@@ -18,42 +18,38 @@ package com.orientechnologies.orient.test.database.speed;
 import java.io.UnsupportedEncodingException;
 import java.util.List;
 
+import org.testng.annotations.Test;
+
 import com.orientechnologies.common.test.SpeedTestMonoThread;
-import com.orientechnologies.orient.client.remote.OEngineRemote;
-import com.orientechnologies.orient.core.Orient;
 import com.orientechnologies.orient.core.command.OCommandResultListener;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.sql.query.OSQLSynchQuery;
 import com.orientechnologies.orient.test.database.base.OrientTest;
 
+@Test(enabled = false)
 public class SQLSynchQuerySpeedTest extends SpeedTestMonoThread implements OCommandResultListener {
 	protected int								resultCount	= 0;
 	private ODatabaseDocumentTx	database;
 
-	public SQLSynchQuerySpeedTest(String iURL) {
-		super(1);
-		Orient.instance().registerEngine(new OEngineRemote());
-		database = new ODatabaseDocumentTx(iURL);
+	public static void main(String[] iArgs) throws InstantiationException, IllegalAccessException {
+		SQLSynchQuerySpeedTest test = new SQLSynchQuerySpeedTest();
+		test.data.go(test);
 	}
 
+	public SQLSynchQuerySpeedTest() {
+		super(1);
+		database = new ODatabaseDocumentTx(System.getProperty("url")).open("admin", "admin");
+
+		System.out.println("Finding Accounts between " + database.countClass("Profile") + " records");
+	}
+
+	@Override
 	public void cycle() throws UnsupportedEncodingException {
-		System.out.println("1 ----------------------");
-		List<ODocument> result = database.command(
-				new OSQLSynchQuery<ODocument>("select * from animal where id = 10 and name like 'G%'")).execute();
+		List<ODocument> result = database.command(new OSQLSynchQuery<ODocument>("select * from Profile where nick = 100010")).execute();
 
-		OrientTest.printRecords(result);
-
-		System.out.println("2 ----------------------");
-		result = database.command(
-				new OSQLSynchQuery<ODocument>("select * from animal where column(0) < 5 or column(0) >= 3 and column(5) < 7")).execute();
-
-		OrientTest.printRecords(result);
-
-		/*
-		 * System.out.println("3 ----------------------"); printResults((List<String>) database.query(new OSQLSynchQuery<String>(
-		 * "select * from animal where column(0) < 5 and column(0) >= 3 or column(0) < 7"), 1000));
-		 */
+		for (ODocument d : result)
+			result(d);
 	}
 
 	public boolean result(final Object iRecord) {

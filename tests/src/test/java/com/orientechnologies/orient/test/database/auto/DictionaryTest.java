@@ -38,7 +38,7 @@ public class DictionaryTest {
 	public void testDictionaryCreate() throws IOException {
 		database.open("admin", "admin");
 
-		database.getDictionary().put("key1", (ORecordFlat) record.value("Dictionary test!"));
+		database.getDictionary().put("key1", record.value("Dictionary test!"));
 
 		database.close();
 	}
@@ -48,7 +48,7 @@ public class DictionaryTest {
 		database.open("admin", "admin");
 
 		Assert.assertNotNull(database.getDictionary().get("key1"));
-		Assert.assertTrue(database.getDictionary().get("key1").value().equals("Dictionary test!"));
+		Assert.assertTrue(((ORecordFlat) database.getDictionary().get("key1")).value().equals("Dictionary test!"));
 
 		database.close();
 	}
@@ -57,14 +57,14 @@ public class DictionaryTest {
 	public void testDictionaryUpdate() throws IOException {
 		database.open("admin", "admin");
 
-		final int originalSize = database.getDictionary().size();
+		final long originalSize = database.getDictionary().size();
 
 		database.getDictionary().put("key1", database.newInstance().value("Text changed"));
 
 		database.close();
 		database.open("admin", "admin");
 
-		Assert.assertTrue(database.getDictionary().get("key1").value().equals("Text changed"));
+		Assert.assertEquals(((ORecordFlat) database.getDictionary().get("key1")).value(), "Text changed");
 		Assert.assertEquals(database.getDictionary().size(), originalSize);
 
 		database.close();
@@ -74,7 +74,7 @@ public class DictionaryTest {
 	public void testDictionaryDelete() throws IOException {
 		database.open("admin", "admin");
 
-		final int originalSize = database.getDictionary().size();
+		final long originalSize = database.getDictionary().size();
 		Assert.assertNotNull(database.getDictionary().remove("key1"));
 
 		database.close();
@@ -89,7 +89,7 @@ public class DictionaryTest {
 	public void testDictionaryMassiveCreate() throws IOException {
 		database.open("admin", "admin");
 
-		final int originalSize = database.getDictionary().size();
+		final long originalSize = database.getDictionary().size();
 
 		// ASSURE TO STORE THE PAGE-SIZE + 3 FORCING THE CREATION OF LEFT AND RIGHT
 		final int total = 1000;
@@ -104,6 +104,19 @@ public class DictionaryTest {
 		}
 
 		Assert.assertEquals(database.getDictionary().size(), originalSize + total);
+
+		database.close();
+	}
+
+	@Test(dependsOnMethods = "testDictionaryMassiveCreate")
+	public void testDictionaryInTx() throws IOException {
+		database.open("admin", "admin");
+
+		database.begin();
+		database.getDictionary().put("tx-key", database.newInstance().value("tx-test-dictionary"));
+		database.commit();
+
+		Assert.assertNotNull(database.getDictionary().get("tx-key"));
 
 		database.close();
 	}

@@ -15,150 +15,338 @@
  */
 package com.orientechnologies.orient.core.db.record;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+
+import com.orientechnologies.common.exception.OException;
 import com.orientechnologies.common.log.OLogManager;
+import com.orientechnologies.orient.core.Orient;
+import com.orientechnologies.orient.core.cache.OLevel1RecordCache;
 import com.orientechnologies.orient.core.command.OCommandRequest;
 import com.orientechnologies.orient.core.command.OCommandRequestInternal;
+import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 import com.orientechnologies.orient.core.db.ODatabase;
 import com.orientechnologies.orient.core.db.ODatabaseComplex;
+import com.orientechnologies.orient.core.db.ODatabaseListener;
+import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
 import com.orientechnologies.orient.core.db.ODatabaseWrapperAbstract;
 import com.orientechnologies.orient.core.db.raw.ODatabaseRaw;
 import com.orientechnologies.orient.core.dictionary.ODictionary;
-import com.orientechnologies.orient.core.dictionary.ODictionaryInternal;
-import com.orientechnologies.orient.core.exception.OConfigurationException;
 import com.orientechnologies.orient.core.exception.ODatabaseException;
 import com.orientechnologies.orient.core.exception.OSecurityAccessException;
+import com.orientechnologies.orient.core.fetch.OFetchHelper;
+import com.orientechnologies.orient.core.hook.OHookThreadLocal;
+import com.orientechnologies.orient.core.hook.ORecordHook;
+import com.orientechnologies.orient.core.hook.ORecordHook.TYPE;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.id.ORecordId;
+import com.orientechnologies.orient.core.index.OClassIndexManager;
 import com.orientechnologies.orient.core.iterator.ORecordIteratorCluster;
 import com.orientechnologies.orient.core.metadata.OMetadata;
+import com.orientechnologies.orient.core.metadata.security.ODatabaseSecurityResources;
+import com.orientechnologies.orient.core.metadata.security.ORole;
 import com.orientechnologies.orient.core.metadata.security.OUser;
-import com.orientechnologies.orient.core.record.ORecordFactory;
+import com.orientechnologies.orient.core.metadata.security.OUserTrigger;
+import com.orientechnologies.orient.core.query.OQuery;
+import com.orientechnologies.orient.core.record.ORecord;
 import com.orientechnologies.orient.core.record.ORecordInternal;
-import com.orientechnologies.orient.core.record.ORecord.STATUS;
-import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.serialization.serializer.record.ORecordSerializer;
 import com.orientechnologies.orient.core.serialization.serializer.record.ORecordSerializerFactory;
+import com.orientechnologies.orient.core.sql.OCommandSQL;
 import com.orientechnologies.orient.core.storage.ORawBuffer;
-import com.orientechnologies.orient.core.storage.impl.memory.OStorageMemory;
+import com.orientechnologies.orient.core.storage.OStorageEmbedded;
+import com.orientechnologies.orient.core.tx.OTransactionRealAbstract;
 
 @SuppressWarnings("unchecked")
-public abstract class ODatabaseRecordAbstract<REC extends ORecordInternal<?>> extends ODatabaseWrapperAbstract<ODatabaseRaw, REC>
-		implements ODatabaseRecord<REC> {
-	private ODictionaryInternal		dictionary;
-	private OMetadata							metadata;
+public abstract class ODatabaseRecordAbstract extends ODatabaseWrapperAbstract<ODatabaseRaw> implements ODatabaseRecord {
 
-	private static final String		DEF_RECORD_FORMAT	= "csv";
-	private Class<? extends REC>	recordClass;
-	private String								recordFormat;
+	private OMetadata												metadata;
+	private OUser														user;
+	private static final String							DEF_RECORD_FORMAT	= "csv";
+	private byte														recordType;
+	private String													recordFormat;
+	private Set<ORecordHook>								hooks							= new HashSet<ORecordHook>();
+	private final Set<ORecordHook>					unmodifiableHooks;
+	private boolean													retainRecords			= true;
+	private OLevel1RecordCache							level1Cache;
+	private boolean													mvcc;
+	private boolean													validation;
+	private ODictionary<ORecordInternal<?>>	dictionary;
 
-	public ODatabaseRecordAbstract(final String iURL, final Class<? extends REC> iRecordClass) {
+	public ODatabaseRecordAbstract(final String iURL, final byte iRecordType) {
 		super(new ODatabaseRaw(iURL));
 		underlying.setOwner(this);
 
+		unmodifiableHooks = Collections.unmodifiableSet(hooks);
+
 		databaseOwner = this;
 
-		try {
-			recordClass = iRecordClass;
+		recordType = iRecordType;
+		level1Cache = new OLevel1RecordCache();
 
-			metadata = new OMetadata(this);
-			dictionary = (ODictionaryInternal) getStorage().createDictionary(this);
-		} catch (Throwable t) {
-			throw new ODatabaseException("Error on opening database '" + getName() + "'", t);
-		}
+		mvcc = OGlobalConfiguration.DB_MVCC.getValueAsBoolean();
+		validation = OGlobalConfiguration.DB_VALIDATION.getValueAsBoolean();
+
+		setCurrentDatabaseinThreadLocal();
 	}
 
 	@Override
 	public <DB extends ODatabase> DB open(final String iUserName, final String iUserPassword) {
+		setCurrentDatabaseinThreadLocal();
+
 		try {
 			super.open(iUserName, iUserPassword);
+			level1Cache.startup();
 
+			metadata = new OMetadata();
 			metadata.load();
 
-			if (!(getStorage() instanceof OStorageMemory)) {
-				user = getMetadata().getSecurity().getUser(iUserName);
-				if (user != null && user.checkPassword(iUserPassword)) {
-					user = getMetadata().getSecurity().getUser(iUserName);
-				} else
-					throw new OSecurityAccessException("Error on opening the database. User and/or password are not valid");
-			}
-
-			checkSecurity(OUser.DATABASE, OUser.READ);
-
 			recordFormat = DEF_RECORD_FORMAT;
-			dictionary.load();
+
+			if (getStorage() instanceof OStorageEmbedded) {
+				user = getMetadata().getSecurity().authenticate(iUserName, iUserPassword);
+				if (user != null) {
+					final Set<ORole> roles = user.getRoles();
+					if (roles == null || roles.isEmpty() || roles.iterator().next() == null) {
+						// SEEMS CORRUPTED: INSTALL DEFAULT ROLE
+						for (ODatabaseListener l : underlying.getListeners()) {
+							if (l.onCorruptionRepairDatabase(this, "Security metadata is broken: current user '" + user.getName()
+									+ "' has no roles defined",
+									"The 'admin' user will be reinstalled with default role ('admin') and password 'admin'")) {
+								user = null;
+								user = metadata.getSecurity().repair();
+								break;
+							}
+						}
+					}
+				}
+				registerHook(new OUserTrigger());
+				registerHook(new OClassIndexManager());
+			} else
+				// CREATE DUMMY USER
+				user = new OUser(iUserName, OUser.encryptPassword(iUserPassword)).addRole(new ORole("passthrough", null,
+						ORole.ALLOW_MODES.ALLOW_ALL_BUT));
+
+			checkSecurity(ODatabaseSecurityResources.DATABASE, ORole.PERMISSION_READ);
+
+			if (!metadata.getSchema().existsClass("ORIDs"))
+				// @COMPATIBILITY 1.0RC9
+				metadata.getSchema().createClass("ORIDs");
+		} catch (OException e) {
+			close();
+			throw e;
 		} catch (Exception e) {
-			throw new ODatabaseException("Can't open database", e);
+			close();
+			throw new ODatabaseException("Cannot open database", e);
 		}
 		return (DB) this;
 	}
 
 	@Override
 	public <DB extends ODatabase> DB create() {
+		setCurrentDatabaseinThreadLocal();
+
 		try {
 			super.create();
 
-			// CREATE THE DEFAULT SCHEMA WITH DEFAULT USER
-			metadata.create();
-			metadata.getSecurity().createUser("admin", "admin", OUser.MODE.ALLOW_ALL_BUT, null);
-			metadata.getSecurity().save();
+			level1Cache.startup();
 
-			dictionary.create();
+			getStorage().getConfiguration().update();
+
+			if (getStorage() instanceof OStorageEmbedded) {
+				registerHook(new OUserTrigger());
+				registerHook(new OClassIndexManager());
+			}
+
+			// CREATE THE DEFAULT SCHEMA WITH DEFAULT USER
+			metadata = new OMetadata();
+			metadata.create();
+
+			user = getMetadata().getSecurity().getUser(OUser.ADMIN);
+
+			if (!metadata.getSchema().existsClass("ORIDs"))
+				// @COMPATIBILITY 1.0RC9
+				metadata.getSchema().createClass("ORIDs");
+
 		} catch (Exception e) {
-			throw new ODatabaseException("Can't create database", e);
+			throw new ODatabaseException("Cannot create database", e);
 		}
 		return (DB) this;
 	}
 
-	public REC load(final REC iRecord) {
-		return load(iRecord.getIdentity().getClusterId(), iRecord.getIdentity().getClusterPosition(), iRecord);
+	@Override
+	public void close() {
+		setCurrentDatabaseinThreadLocal();
+
+		if (metadata != null) {
+			metadata.close();
+			metadata = null;
+		}
+
+		super.close();
+
+		hooks.clear();
+		dictionary = null;
+
+		user = null;
+		level1Cache.shutdown();
 	}
 
-	public REC load(final ORID iRecordId) {
-		return load(iRecordId.getClusterId(), iRecordId.getClusterPosition(), (REC) databaseOwner.newInstance());
+	public ODictionary<ORecordInternal<?>> getDictionary() {
+		checkOpeness();
+		if (dictionary == null)
+			dictionary = metadata.getIndexManager().getDictionary();
+		return dictionary;
 	}
 
-	public REC load(final int iClusterId, final long iPosition, final REC iRecord) {
-		return executeReadRecord(iClusterId, iPosition, iRecord);
+	public <RET extends ORecordInternal<?>> RET getRecord(final OIdentifiable iIdentifiable) {
+		if (iIdentifiable instanceof ORecord<?>)
+			return (RET) iIdentifiable;
+		return (RET) load(iIdentifiable.getIdentity());
+	}
+
+	public <RET extends ORecordInternal<?>> RET load(final ORecordInternal<?> iRecord) {
+		return (RET) load(iRecord, null);
+	}
+
+	@Override
+	public void reload() {
+		metadata.reload();
+		super.reload();
+	}
+
+	public void reload(final ORecordInternal<?> iRecord) {
+		executeReadRecord((ORecordId) iRecord.getIdentity(), iRecord, null, true);
+	}
+
+	public void reload(final ORecordInternal<?> iRecord, final String iFetchPlan) {
+		executeReadRecord((ORecordId) iRecord.getIdentity(), iRecord, iFetchPlan, true);
+	}
+
+	public void reload(final ORecordInternal<?> iRecord, final String iFetchPlan, boolean iIgnoreCache) {
+		executeReadRecord((ORecordId) iRecord.getIdentity(), iRecord, iFetchPlan, iIgnoreCache);
 	}
 
 	/**
-	 * Update the record without checking the version.
+	 * Loads a record using a fetch plan.
 	 */
-	public ODatabaseRecord<REC> save(final REC iContent) {
-		executeSaveRecord(iContent, null, iContent.getVersion(), iContent.getRecordType());
+	public <RET extends ORecordInternal<?>> RET load(final ORecordInternal<?> iRecord, final String iFetchPlan) {
+		return (RET) executeReadRecord((ORecordId) iRecord.getIdentity(), iRecord, iFetchPlan, false);
+	}
+
+	public <RET extends ORecordInternal<?>> RET load(final ORecordInternal<?> iRecord, final String iFetchPlan,
+			final boolean iIgnoreCache) {
+		return (RET) executeReadRecord((ORecordId) iRecord.getIdentity(), iRecord, iFetchPlan, iIgnoreCache);
+	}
+
+	public <RET extends ORecordInternal<?>> RET load(final ORID iRecordId) {
+		return (RET) executeReadRecord((ORecordId) iRecordId, null, null, false);
+	}
+
+	public <RET extends ORecordInternal<?>> RET load(final ORID iRecordId, final String iFetchPlan) {
+		return (RET) executeReadRecord((ORecordId) iRecordId, null, iFetchPlan, false);
+	}
+
+	public <RET extends ORecordInternal<?>> RET load(final ORID iRecordId, final String iFetchPlan, final boolean iIgnoreCache) {
+		return (RET) executeReadRecord((ORecordId) iRecordId, null, iFetchPlan, iIgnoreCache);
+	}
+
+	/**
+	 * Updates the record without checking the version.
+	 */
+	public ODatabaseRecord save(final ORecordInternal<?> iContent) {
+		executeSaveRecord(iContent, null, iContent.getVersion(), iContent.getRecordType(), OPERATION_MODE.SYNCHRONOUS);
 		return this;
 	}
 
 	/**
-	 * Update the record in the requested cluster without checking the version.
+	 * Updates the record without checking the version.
 	 */
-	public ODatabaseRecord<REC> save(final REC iContent, final String iClusterName) {
-		executeSaveRecord(iContent, iClusterName, iContent.getVersion(), iContent.getRecordType());
+	public ODatabaseRecord save(final ORecordInternal<?> iContent, final OPERATION_MODE iMode) {
+		executeSaveRecord(iContent, null, iContent.getVersion(), iContent.getRecordType(), iMode);
 		return this;
 	}
 
 	/**
-	 * Delete the record without checking the version.
+	 * Updates the record in the requested cluster without checking the version.
 	 */
-	public ODatabaseRecord<REC> delete(final REC iRecord) {
-		executeDeleteRecord(iRecord, -1);
+	public ODatabaseRecord save(final ORecordInternal<?> iContent, final String iClusterName) {
+		executeSaveRecord(iContent, iClusterName, iContent.getVersion(), iContent.getRecordType(), OPERATION_MODE.SYNCHRONOUS);
 		return this;
 	}
 
-	public ORecordIteratorCluster<REC> browseCluster(String iClusterName) {
-		checkSecurity(OUser.CLUSTER + "." + iClusterName, OUser.READ);
+	/**
+	 * Updates the record in the requested cluster without checking the version.
+	 */
+	public ODatabaseRecord save(final ORecordInternal<?> iContent, final String iClusterName, final OPERATION_MODE iMode) {
+		executeSaveRecord(iContent, iClusterName, iContent.getVersion(), iContent.getRecordType(), iMode);
+		return this;
+	}
 
-		return new ORecordIteratorCluster<REC>(this, this, getClusterIdByName(iClusterName));
+	/**
+	 * Deletes the record without checking the version.
+	 */
+	public ODatabaseRecord delete(final ORID iRecord) {
+		executeDeleteRecord(iRecord, -1, true, OPERATION_MODE.SYNCHRONOUS);
+		return this;
+	}
+
+	/**
+	 * Deletes the record without checking the version.
+	 */
+	public ODatabaseRecord delete(final ORID iRecord, final OPERATION_MODE iMode) {
+		executeDeleteRecord(iRecord, -1, true, iMode);
+		return this;
+	}
+
+	/**
+	 * Deletes the record without checking the version.
+	 */
+	public ODatabaseRecord delete(final ORecordInternal<?> iRecord) {
+		executeDeleteRecord(iRecord, -1, true, OPERATION_MODE.SYNCHRONOUS);
+		return this;
+	}
+
+	/**
+	 * Deletes the record without checking the version.
+	 */
+	public ODatabaseRecord delete(final ORecordInternal<?> iRecord, final OPERATION_MODE iMode) {
+		executeDeleteRecord(iRecord, -1, true, iMode);
+		return this;
+	}
+
+	public <REC extends ORecordInternal<?>> ORecordIteratorCluster<REC> browseCluster(final String iClusterName,
+			final Class<REC> iClass) {
+		checkSecurity(ODatabaseSecurityResources.CLUSTER, ORole.PERMISSION_READ, iClusterName);
+
+		setCurrentDatabaseinThreadLocal();
+
+		final int clusterId = getClusterIdByName(iClusterName);
+
+		return new ORecordIteratorCluster<REC>(this, this, clusterId);
+	}
+
+	public ORecordIteratorCluster<?> browseCluster(final String iClusterName) {
+		checkSecurity(ODatabaseSecurityResources.CLUSTER, ORole.PERMISSION_READ, iClusterName);
+
+		setCurrentDatabaseinThreadLocal();
+
+		final int clusterId = getClusterIdByName(iClusterName);
+
+		return new ORecordIteratorCluster<ORecordInternal<?>>(this, this, clusterId);
 	}
 
 	public OCommandRequest command(final OCommandRequest iCommand) {
-		checkSecurity(OUser.COMMAND, OUser.READ);
+		setCurrentDatabaseinThreadLocal();
 
-		OCommandRequestInternal command = (OCommandRequestInternal) iCommand;
+		final OCommandRequestInternal command = (OCommandRequestInternal) iCommand;
 
 		try {
-			command.setDatabase((ODatabaseRecord<ODocument>) getDatabaseOwner());
-
+			command.reset();
 			return command;
 
 		} catch (Exception e) {
@@ -166,38 +354,19 @@ public abstract class ODatabaseRecordAbstract<REC extends ORecordInternal<?>> ex
 		}
 	}
 
-	//
-	// public OQuery<REC> query(final OQuery<REC> iQuery) {
-	// checkSecurity(OUser.QUERY, OUser.READ);
-	//
-	// OQueryInternal<REC> query = (OQueryInternal<REC>) iQuery;
-	//
-	// try {
-	// query.setDatabase((ODatabaseRecord<REC>) getDatabaseOwner());
-	//
-	// if (query.getRecord() == null)
-	// query.setRecord((REC) getDatabaseOwner().newInstance());
-	//
-	// return query;
-	//
-	// } catch (Exception e) {
-	// throw new ODatabaseException("Error on query execution", e);
-	// }
-	// }
+	public <RET extends List<?>> RET query(final OQuery<? extends Object> iCommand, final Object... iArgs) {
+		setCurrentDatabaseinThreadLocal();
 
-	public Class<? extends REC> getRecordType() {
-		return recordClass;
+		iCommand.reset();
+		return (RET) iCommand.execute(iArgs);
 	}
 
-	public REC newInstance() {
-		if (recordClass == null)
-			throw new OConfigurationException("Can't create record since no record class was specified");
-
-		return (REC) ORecordFactory.instance().newInstance(this, recordClass);
+	public byte getRecordType() {
+		return recordType;
 	}
 
-	public REC newInstance(final Class<REC> iType) {
-		return (REC) ORecordFactory.instance().newInstance(this, iType);
+	public <RET extends Object> RET newInstance() {
+		return (RET) Orient.instance().getRecordFactoryManager().newInstance(recordType);
 	}
 
 	@Override
@@ -205,7 +374,7 @@ public abstract class ODatabaseRecordAbstract<REC extends ORecordInternal<?>> ex
 		String name;
 		for (int i = 0; i < iClusterIds.length; ++i) {
 			name = getClusterNameById(iClusterIds[i]);
-			checkSecurity(OUser.CLUSTER + "." + name, OUser.READ);
+			checkSecurity(ODatabaseSecurityResources.CLUSTER, ORole.PERMISSION_READ, name);
 		}
 
 		return super.countClusterElements(iClusterIds);
@@ -213,156 +382,456 @@ public abstract class ODatabaseRecordAbstract<REC extends ORecordInternal<?>> ex
 
 	@Override
 	public long countClusterElements(final int iClusterId) {
-		String name = getClusterNameById(iClusterId);
-		checkSecurity(OUser.CLUSTER + "." + name, OUser.READ);
+		final String name = getClusterNameById(iClusterId);
+		checkSecurity(ODatabaseSecurityResources.CLUSTER, ORole.PERMISSION_READ, name);
+		setCurrentDatabaseinThreadLocal();
 		return super.countClusterElements(name);
 	}
 
 	@Override
 	public long countClusterElements(final String iClusterName) {
-		checkSecurity(OUser.CLUSTER + "." + iClusterName, OUser.READ);
+		checkSecurity(ODatabaseSecurityResources.CLUSTER, ORole.PERMISSION_READ, iClusterName);
+		setCurrentDatabaseinThreadLocal();
 		return super.countClusterElements(iClusterName);
 	}
 
 	public OMetadata getMetadata() {
+		checkOpeness();
 		return metadata;
 	}
 
-	public ODictionary<REC> getDictionary() {
-		checkOpeness();
-		return dictionary;
+	public <DB extends ODatabaseRecord> DB checkSecurity(final String iResource, final int iOperation) {
+		if (user != null) {
+			try {
+				user.allow(iResource, iOperation);
+			} catch (OSecurityAccessException e) {
+
+				if (OLogManager.instance().isDebugEnabled())
+					OLogManager.instance().debug(this,
+							"[checkSecurity] User '%s' tried to access to the reserved resource '%s', operation '%s'", getUser(), iResource,
+							iOperation);
+
+				throw e;
+			}
+		}
+		return (DB) this;
 	}
 
-	public REC executeReadRecord(final int iClusterId, final long iPosition, REC iRecord) {
+	public <DB extends ODatabaseRecord> DB checkSecurity(final String iResourceGeneric, final int iOperation,
+			final Object... iResourcesSpecific) {
+
+		if (user != null) {
+			try {
+				final StringBuilder keyBuffer = new StringBuilder();
+
+				boolean ruleFound = false;
+				for (Object target : iResourcesSpecific) {
+					if (target != null) {
+						keyBuffer.setLength(0);
+						keyBuffer.append(iResourceGeneric);
+						keyBuffer.append('.');
+						keyBuffer.append(target.toString());
+
+						final String key = keyBuffer.toString();
+
+						if (user.isRuleDefined(key)) {
+							ruleFound = true;
+							// RULE DEFINED: CHECK AGAINST IT
+							user.allow(key, iOperation);
+						}
+					}
+				}
+
+				if (!ruleFound) {
+					// CHECK AGAINST GENERIC RULE
+					keyBuffer.setLength(0);
+					keyBuffer.append(iResourceGeneric);
+					keyBuffer.append('.');
+					keyBuffer.append(ODatabaseSecurityResources.ALL);
+
+					user.allow(keyBuffer.toString(), iOperation);
+				}
+
+			} catch (OSecurityAccessException e) {
+				if (OLogManager.instance().isDebugEnabled())
+					OLogManager.instance().debug(this,
+							"[checkSecurity] User '%s' tried to access to the reserved resource '%s', target(s) '%s', operation '%s'", getUser(),
+							iResourceGeneric, Arrays.toString(iResourcesSpecific), iOperation);
+
+				throw e;
+			}
+		}
+		return (DB) this;
+	}
+
+	public <DB extends ODatabaseRecord> DB checkSecurity(final String iResourceGeneric, final int iOperation,
+			final Object iResourceSpecific) {
+
+		if (user != null) {
+			try {
+				final StringBuilder keyBuffer = new StringBuilder();
+
+				boolean ruleFound = false;
+				if (iResourceSpecific != null) {
+					keyBuffer.setLength(0);
+					keyBuffer.append(iResourceGeneric);
+					keyBuffer.append('.');
+					keyBuffer.append(iResourceSpecific.toString());
+
+					final String key = keyBuffer.toString();
+
+					if (user.isRuleDefined(key)) {
+						ruleFound = true;
+						// RULE DEFINED: CHECK AGAINST IT
+						user.allow(key, iOperation);
+					}
+				}
+
+				if (!ruleFound) {
+					// CHECK AGAINST GENERIC RULE
+					keyBuffer.setLength(0);
+					keyBuffer.append(iResourceGeneric);
+					keyBuffer.append('.');
+					keyBuffer.append(ODatabaseSecurityResources.ALL);
+
+					user.allow(keyBuffer.toString(), iOperation);
+				}
+
+			} catch (OSecurityAccessException e) {
+				if (OLogManager.instance().isDebugEnabled())
+					OLogManager.instance().debug(this,
+							"[checkSecurity] User '%s' tried to access to the reserved resource '%s', target '%s', operation '%s'", getUser(),
+							iResourceGeneric, iResourceSpecific, iOperation);
+
+				throw e;
+			}
+		}
+		return (DB) this;
+	}
+
+	public <RET extends ORecordInternal<?>> RET executeReadRecord(final ORecordId iRid, ORecordInternal<?> iRecord,
+			final String iFetchPlan, final boolean iIgnoreCache) {
 		checkOpeness();
 
-		try {
-			checkSecurity(OUser.CLUSTER + "." + iClusterId, OUser.READ);
+		// setCurrentDatabaseinThreadLocal();
 
-			final ORawBuffer recordBuffer = underlying.read(iClusterId, iPosition);
+		try {
+			checkSecurity(ODatabaseSecurityResources.CLUSTER, ORole.PERMISSION_READ, getClusterNameById(iRid.getClusterId()));
+
+			// SEARCH IN LOCAL TX
+			ORecordInternal<?> record = getTransaction().getRecord(iRid);
+			if (record == OTransactionRealAbstract.DELETED_RECORD)
+				// DELETED IN TX
+				return null;
+
+			if (record == null && !iIgnoreCache)
+				// SEARCH INTO THE CACHE
+				record = getLevel1Cache().findRecord(iRid);
+
+			if (record != null) {
+				if (iRecord != null) {
+					iRecord.fromStream(record.toStream());
+					record = iRecord;
+				}
+
+				OFetchHelper.checkFetchPlanValid(iFetchPlan);
+				callbackHooks(TYPE.BEFORE_READ, record);
+
+				if (record.getInternalStatus() == ORecordElement.STATUS.NOT_LOADED)
+					record.reload();
+
+				callbackHooks(TYPE.AFTER_READ, record);
+				return (RET) record;
+			}
+
+			final ORawBuffer recordBuffer = underlying.read(iRid, iFetchPlan, iIgnoreCache);
 			if (recordBuffer == null)
 				return null;
 
-			if (iRecord.getRecordType() != recordBuffer.recordType)
+			if (iRecord == null || iRecord.getRecordType() != recordBuffer.recordType)
 				// NO SAME RECORD TYPE: CAN'T REUSE OLD ONE BUT CREATE A NEW ONE FOR IT
-				iRecord = (REC) ORecordFactory.getRecord(recordBuffer.recordType);
+				iRecord = Orient.instance().getRecordFactoryManager().newInstance(recordBuffer.recordType);
 
-			iRecord.unsetDirty();
+			iRecord.fill(iRid, recordBuffer.version, recordBuffer.buffer, false);
 
-			ODatabaseRecord<?> currDb = iRecord.getDatabase();
-			if (currDb == null)
-				currDb = (ODatabaseRecord<?>) databaseOwner;
+			callbackHooks(TYPE.BEFORE_READ, iRecord);
 
-			iRecord.fill(currDb, iClusterId, iPosition, recordBuffer.version);
 			iRecord.fromStream(recordBuffer.buffer);
-			iRecord.setStatus(STATUS.LOADED);
+			iRecord.setInternalStatus(ORecordElement.STATUS.LOADED);
 
-			return (REC) iRecord;
-		} catch (ODatabaseException e) {
+			callbackHooks(TYPE.AFTER_READ, iRecord);
+
+			if (!iIgnoreCache)
+				getLevel1Cache().updateRecord(iRecord);
+
+			return (RET) iRecord;
+		} catch (OException e) {
 			// RE-THROW THE EXCEPTION
 			throw e;
 
-		} catch (Throwable t) {
+		} catch (Exception e) {
 			// WRAP IT AS ODATABASE EXCEPTION
-			OLogManager.instance().error(this,
-					"Error on retrieving record #" + iPosition + " in cluster '" + getStorage().getPhysicalClusterNameById(iClusterId) + "'",
-					t);
+			OLogManager.instance().exception("Error on retrieving record " + iRid, e, ODatabaseException.class);
 		}
 		return null;
 	}
 
-	public void executeSaveRecord(final REC iContent, String iClusterName, final int iVersion, final byte iRecordType) {
+	public void executeSaveRecord(final ORecordInternal<?> iRecord, String iClusterName, final int iVersion, final byte iRecordType,
+			final OPERATION_MODE iMode) {
 		checkOpeness();
 
-		if (!iContent.isDirty())
+		if (!iRecord.isDirty())
 			return;
 
-		final ORecordId rid = (ORecordId) iContent.getIdentity();
+		final ORecordId rid = (ORecordId) iRecord.getIdentity();
 
 		if (rid == null)
 			throw new ODatabaseException(
-					"Can't create record because it has no identity. Probably is not a regular record or contains projections of fields rather than a full record");
+					"Cannot create record because it has no identity. Probably is not a regular record or contains projections of fields rather than a full record");
+
+		setCurrentDatabaseinThreadLocal();
 
 		try {
-			final int clusterId;
+			final boolean wasNew = rid.isNew();
 
-			boolean isNew = !rid.isValid();
-			if (isNew) {
-				clusterId = iClusterName != null ? getClusterIdByName(iClusterName) : getDefaultClusterId();
+			// STREAM.LENGTH == 0 -> RECORD IN STACK: WILL BE SAVED AFTER
+			byte[] stream = iRecord.toStream();
 
-				// CHECK ACCESS ON CLUSTER
-				checkSecurity(OUser.CLUSTER + "." + clusterId, OUser.CREATE);
-			} else {
-				clusterId = rid.clusterId;
+			final boolean isNew = rid.isNew();
+			if (isNew)
+				// NOTIFY IDENTITY HAS CHANGED
+				iRecord.onBeforeIdentityChanged(rid);
+			else if (stream.length == 0)
+				// ALREADY CREATED AND WAITING FOR THE RIGHT UPDATE (WE'RE IN A GRAPH)
+				return;
 
-				// CHECK ACCESS ON CLUSTER
-				checkSecurity(OUser.CLUSTER + "." + clusterId, OUser.UPDATE);
+			if (isNew && rid.clusterId < 0)
+				rid.clusterId = iClusterName != null ? getClusterIdByName(iClusterName) : getDefaultClusterId();
+
+			if (rid.clusterId > -1 && iClusterName == null)
+				iClusterName = getClusterNameById(rid.clusterId);
+
+			if (stream != null && stream.length > 0) {
+				if (wasNew) {
+					// CHECK ACCESS ON CLUSTER
+					checkSecurity(ODatabaseSecurityResources.CLUSTER, ORole.PERMISSION_CREATE, iClusterName);
+					if (callbackHooks(TYPE.BEFORE_CREATE, iRecord))
+						// RECORD CHANGED IN TRIGGER, REACQUIRE IT
+						stream = iRecord.toStream();
+				} else {
+					// CHECK ACCESS ON CLUSTER
+					checkSecurity(ODatabaseSecurityResources.CLUSTER, ORole.PERMISSION_UPDATE, iClusterName);
+					if (callbackHooks(TYPE.BEFORE_UPDATE, iRecord))
+						// RECORD CHANGED IN TRIGGER, REACQUIRE IT
+						stream = iRecord.toStream();
+				}
+
+				if (!iRecord.isDirty()) {
+					// RECORD SAVED DURING PREVIOUS STREAMING PHASE: THIS HAPPENS FOR CIRCULAR REFERENCED RECORDS
+					// ADD/UPDATE IT IN CACHE IF IT'S ACTIVE
+					getLevel1Cache().updateRecord(iRecord);
+					return;
+				}
 			}
 
-			final byte[] stream = iContent.toStream();
+			// GET THE LATEST VERSION. IT COULD CHANGE BECAUSE THE RECORD COULD BE BEEN LINKED FROM OTHERS
+			final int realVersion = iVersion == -1 || !mvcc ? -1 : iRecord.getVersion();
 
 			// SAVE IT
-			long result = underlying.save(clusterId, rid.getClusterPosition(), stream, iVersion, iContent.getRecordType());
+			final long result = underlying.save(rid, stream, realVersion, iRecord.getRecordType(), iMode.ordinal());
 
-			if (isNew)
+			if (isNew) {
 				// UPDATE INFORMATION: CLUSTER ID+POSITION
-				iContent.fill(iContent.getDatabase(), clusterId, result, 0);
-			else
+				((ORecordId) iRecord.getIdentity()).copyFrom(rid);
+				// NOTIFY IDENTITY HAS CHANGED
+				iRecord.onAfterIdentityChanged(iRecord);
+				// UPDATE INFORMATION: CLUSTER ID+POSITION
+				iRecord.fill(rid, 0, stream, stream == null || stream.length == 0);
+			} else {
 				// UPDATE INFORMATION: VERSION
-				iContent.fill(iContent.getDatabase(), clusterId, rid.getClusterPosition(), (int) result);
+				iRecord.fill(rid, (int) result, stream, stream == null || stream.length == 0);
+			}
 
-			iContent.unsetDirty();
-		} catch (ODatabaseException e) {
+			callbackHooks(wasNew ? TYPE.AFTER_CREATE : TYPE.AFTER_UPDATE, iRecord);
+
+			if (stream != null && stream.length > 0)
+				// ADD/UPDATE IT IN CACHE IF IT'S ACTIVE
+				getLevel1Cache().updateRecord(iRecord);
+
+		} catch (OException e) {
 			// RE-THROW THE EXCEPTION
 			throw e;
+
 		} catch (Throwable t) {
 			// WRAP IT AS ODATABASE EXCEPTION
-			throw new ODatabaseException("Error on saving record in cluster #" + iContent.getIdentity().getClusterId(), t);
+			throw new ODatabaseException("Error on saving record in cluster #" + iRecord.getIdentity().getClusterId(), t);
 		}
 	}
 
-	public void executeDeleteRecord(final REC iContent, final int iVersion) {
+	public void executeDeleteRecord(final OIdentifiable iRecord, final int iVersion, final boolean iRequired,
+			final OPERATION_MODE iMode) {
 		checkOpeness();
-		ORecordId rid = (ORecordId) iContent.getIdentity();
+		final ORecordId rid = (ORecordId) iRecord.getIdentity();
 
 		if (rid == null)
 			throw new ODatabaseException(
-					"Can't delete record because it has no identity. Probably was created from scratch or contains projections of fields rather than a full record");
+					"Cannot delete record because it has no identity. Probably was created from scratch or contains projections of fields rather than a full record");
 
-		checkSecurity(OUser.CLUSTER + "." + iContent.getIdentity().getClusterId(), OUser.DELETE);
+		if (!rid.isValid())
+			return;
+
+		checkSecurity(ODatabaseSecurityResources.CLUSTER, ORole.PERMISSION_DELETE, getClusterNameById(rid.clusterId));
+
+		setCurrentDatabaseinThreadLocal();
 
 		try {
-			underlying.delete(iContent.getIdentity().getClusterId(), iContent.getIdentity().getClusterPosition(), iVersion);
+			callbackHooks(TYPE.BEFORE_DELETE, iRecord);
 
-			// DELETE IT ALSO IN CACHE
-			if (underlying.isUseCache())
-				getCache().removeRecord(rid.toString());
+			underlying.delete(rid, iVersion, iRequired, (byte) iMode.ordinal());
 
-		} catch (ODatabaseException e) {
+			callbackHooks(TYPE.AFTER_DELETE, iRecord);
+
+			// REMOVE THE RECORD FROM 1 AND 2 LEVEL CACHES
+			getLevel1Cache().deleteRecord(rid);
+
+		} catch (OException e) {
 			// RE-THROW THE EXCEPTION
 			throw e;
 
 		} catch (Throwable t) {
 			// WRAP IT AS ODATABASE EXCEPTION
-			throw new ODatabaseException("Error on deleting record in cluster #" + iContent.getIdentity().getClusterId(), t);
+			throw new ODatabaseException("Error on deleting record in cluster #" + iRecord.getIdentity().getClusterId(), t);
 		}
 	}
 
-	public ODatabaseRecord<?> getDatabaseOwner() {
-		return (ODatabaseRecord<?>) databaseOwner;
+	@Override
+	public ODatabaseComplex<?> getDatabaseOwner() {
+		ODatabaseComplex<?> current = databaseOwner;
+
+		while (current != null && current != this && current.getDatabaseOwner() != current)
+			current = current.getDatabaseOwner();
+
+		return current;
 	}
 
-	public ODatabaseComplex<REC> setDatabaseOwner(ODatabaseComplex<?> iOwner) {
-		databaseOwner = (ODatabaseRecord<?>) iOwner;
+	@Override
+	public ODatabaseComplex<ORecordInternal<?>> setDatabaseOwner(ODatabaseComplex<?> iOwner) {
+		databaseOwner = iOwner;
 		return this;
+	}
+
+	public boolean isRetainRecords() {
+		return retainRecords;
+	}
+
+	public ODatabaseRecord setRetainRecords(boolean retainRecords) {
+		this.retainRecords = retainRecords;
+		return this;
+	}
+
+	public <DB extends ODatabase> DB setStatus(final STATUS status) {
+		final String cmd = String.format("alter database status %s", status.toString());
+		command(new OCommandSQL(cmd)).execute();
+		return (DB) this;
+	}
+
+	public void setStatusInternal(final STATUS status) {
+		underlying.setStatus(status);
+	}
+
+	public void setInternal(final ATTRIBUTES iAttribute, final Object iValue) {
+		if (iAttribute == null)
+			throw new IllegalArgumentException("attribute is null");
+
+		final String stringValue = iValue != null ? iValue.toString() : null;
+
+		switch (iAttribute) {
+		case STATUS:
+			setStatusInternal(STATUS.valueOf(stringValue.toUpperCase(Locale.ENGLISH)));
+			break;
+		}
+	}
+
+	public OUser getUser() {
+		return user;
+	}
+
+	public boolean isMVCC() {
+		return mvcc;
+	}
+
+	public <DB extends ODatabaseComplex<?>> DB setMVCC(boolean mvcc) {
+		this.mvcc = mvcc;
+		return (DB) this;
+	}
+
+	public <DB extends ODatabaseComplex<?>> DB registerHook(final ORecordHook iHookImpl) {
+		hooks.add(iHookImpl);
+		return (DB) this;
+	}
+
+	public <DB extends ODatabaseComplex<?>> DB unregisterHook(final ORecordHook iHookImpl) {
+		hooks.remove(iHookImpl);
+		return (DB) this;
+	}
+
+	@Override
+	public OLevel1RecordCache getLevel1Cache() {
+		return level1Cache;
+	}
+
+	public Set<ORecordHook> getHooks() {
+		return unmodifiableHooks;
+	}
+
+	/**
+	 * Callback the registeted hooks if any.
+	 * 
+	 * @param iType
+	 * @param id
+	 *          Record received in the callback
+	 * @return True if the input record is changed, otherwise false
+	 */
+	public boolean callbackHooks(final TYPE iType, final OIdentifiable id) {
+		if (!OHookThreadLocal.INSTANCE.push(id))
+			return false;
+
+		try {
+			final ORecord<?> rec = id.getRecord();
+			if (rec == null)
+				return false;
+
+			boolean recordChanged = false;
+			for (ORecordHook hook : hooks)
+				if (hook.onTrigger(iType, rec))
+					recordChanged = true;
+			return recordChanged;
+
+		} finally {
+			OHookThreadLocal.INSTANCE.pop(id);
+		}
 	}
 
 	protected ORecordSerializer resolveFormat(final Object iObject) {
 		return ORecordSerializerFactory.instance().getFormatForObject(iObject, recordFormat);
 	}
 
+	@Override
 	protected void checkOpeness() {
 		if (isClosed())
-			throw new ODatabaseException("Database is closed");
+			throw new ODatabaseException("Database '" + getURL() + "' is closed");
+	}
+
+	protected void setCurrentDatabaseinThreadLocal() {
+		ODatabaseRecordThreadLocal.INSTANCE.set(this);
+	}
+
+	public boolean isValidationEnabled() {
+		return !getStatus().equals(STATUS.IMPORTING) && validation;
+	}
+
+	public <DB extends ODatabaseRecord> DB setValidationEnabled(final boolean iEnabled) {
+		validation = iEnabled;
+		return (DB) this;
 	}
 }

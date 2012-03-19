@@ -15,7 +15,11 @@
  */
 package com.orientechnologies.orient.core.sql;
 
-import com.orientechnologies.orient.core.command.OCommandRequestInternal;
+import java.util.Locale;
+import java.util.Map;
+
+import com.orientechnologies.orient.core.command.OCommandContext;
+import com.orientechnologies.orient.core.command.OCommandRequestText;
 
 /**
  * SQL UPDATE command.
@@ -27,28 +31,34 @@ public class OCommandExecutorSQLDelegate extends OCommandExecutorSQLAbstract {
 	private OCommandExecutorSQLAbstract	delegate;
 
 	@SuppressWarnings("unchecked")
-	public OCommandExecutorSQLDelegate parse(final OCommandRequestInternal iCommand) {
-		if (iCommand instanceof OCommandSQL) {
-			OCommandSQL sql = (OCommandSQL) iCommand;
-			final String text = sql.getText();
-			final String textUpperCase = text.toUpperCase();
+	public OCommandExecutorSQLDelegate parse(final OCommandRequestText iCommand) {
+		if (iCommand instanceof OCommandRequestText) {
+			OCommandRequestText textRequest = iCommand;
+			final String text = textRequest.getText();
+			final String textUpperCase = text.toUpperCase(Locale.ENGLISH);
 
-			if (textUpperCase.startsWith(OSQLHelper.KEYWORD_SELECT))
-				delegate = new OCommandExecutorSQLSelect().parse(iCommand);
-			else if (textUpperCase.startsWith(OSQLHelper.KEYWORD_INSERT))
-				delegate = new OCommandExecutorSQLInsert().parse(iCommand);
-			else if (textUpperCase.startsWith(OSQLHelper.KEYWORD_UPDATE))
-				delegate = new OCommandExecutorSQLUpdate().parse(iCommand);
-			else if (textUpperCase.startsWith(OSQLHelper.KEYWORD_DELETE))
-				delegate = new OCommandExecutorSQLDelete().parse(iCommand);
-			else
-				throw new IllegalArgumentException("Can't find a command executor for the command request: " + iCommand);
+			delegate = (OCommandExecutorSQLAbstract) OSQLEngine.getInstance().getCommand(textUpperCase);
+			if (delegate == null)
+				throw new IllegalArgumentException("Cannot find a command executor for the command request: " + iCommand);
+
+			delegate.setLimit(iCommand.getLimit());
+			delegate.parse(iCommand);
+			delegate.setProgressListener(progressListener);
 		} else
-			throw new IllegalArgumentException("Can't find a command executor for the command request: " + iCommand);
+			throw new IllegalArgumentException("Cannot find a command executor for the command request: " + iCommand);
 		return this;
 	}
 
-	public Object execute(final Object... iArgs) {
+	public Object execute(final Map<Object, Object> iArgs) {
 		return delegate.execute(iArgs);
+	}
+
+	@Override
+	public OCommandContext getContext() {
+		return delegate.getContext();
+	}
+
+	public String getSyntax() {
+		return delegate.getSyntax();
 	}
 }

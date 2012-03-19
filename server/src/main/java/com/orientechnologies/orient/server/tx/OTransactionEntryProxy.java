@@ -15,11 +15,14 @@
  */
 package com.orientechnologies.orient.server.tx;
 
-import com.orientechnologies.orient.core.tx.OTransactionEntry;
+import java.io.IOException;
 
-public class OTransactionEntryProxy extends OTransactionEntry<OTransactionRecordProxy> {
+import com.orientechnologies.orient.core.Orient;
+import com.orientechnologies.orient.core.db.record.ORecordOperation;
 
-	public OTransactionEntryProxy() {
-		super(new OTransactionRecordProxy(), (byte) 0, null);
+public class OTransactionEntryProxy extends ORecordOperation {
+
+	public OTransactionEntryProxy(final byte iRecordType) throws IOException {
+		super(Orient.instance().getRecordFactoryManager().newInstance(iRecordType), (byte) 0);
 	}
 }

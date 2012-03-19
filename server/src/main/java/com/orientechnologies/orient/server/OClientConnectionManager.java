@@ -17,65 +17,192 @@ package com.orientechnologies.orient.server;
 
 import java.io.IOException;
 import java.net.Socket;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 
+import com.orientechnologies.common.concur.resource.OSharedResourceAbstract;
 import com.orientechnologies.common.log.OLogManager;
 import com.orientechnologies.common.profiler.OProfiler;
+import com.orientechnologies.orient.core.record.ORecordInternal;
+import com.orientechnologies.orient.enterprise.channel.binary.OChannelBinary;
+import com.orientechnologies.orient.enterprise.channel.binary.OChannelBinaryProtocol;
 import com.orientechnologies.orient.server.network.protocol.ONetworkProtocol;
+import com.orientechnologies.orient.server.network.protocol.binary.ONetworkProtocolBinary;
 
-public class OClientConnectionManager {
-	public static final int												DEFAULT_CONN_EXPIRATION	= 60;																			// SECONDS
-	protected int																	expiration							= DEFAULT_CONN_EXPIRATION;
-	protected Map<String, OClientConnection>			connections							= new HashMap<String, OClientConnection>();
-	protected Map<String, ONetworkProtocol>				handlers								= new HashMap<String, ONetworkProtocol>();
+public class OClientConnectionManager extends OSharedResourceAbstract {
+	protected Map<Integer, OClientConnection>			connections				= new HashMap<Integer, OClientConnection>();
+	protected int																	connectionSerial	= 0;
 
-	private static final OClientConnectionManager	instance								= new OClientConnectionManager();
+	private static final OClientConnectionManager	instance					= new OClientConnectionManager();
 
 	public OClientConnectionManager() {
 	}
 
-	public void connect(final Socket iSocket, final OClientConnection iConnection) throws IOException {
-		OProfiler.getInstance().updateStatistic("OServer.threads.actives", +1);
+	/**
+	 * Create a connection.
+	 * 
+	 * @param iSocket
+	 * @param iProtocol
+	 * @return
+	 * @throws IOException
+	 */
+	public OClientConnection connect(final Socket iSocket, final ONetworkProtocol iProtocol) throws IOException {
+		OProfiler.getInstance().updateCounter("OServer.connections.actives", +1);
 
-		connections.put(iConnection.id, iConnection);
+		final OClientConnection connection;
 
-		handlers.put(iConnection.id, iConnection.protocol);
+		acquireExclusiveLock();
+		try {
+			connection = new OClientConnection(++connectionSerial, iProtocol);
 
-		OLogManager.instance().info(this, "Remote client connected from: " + iConnection);
+			connections.put(connection.id, connection);
+
+		} finally {
+			releaseExclusiveLock();
+		}
+
+		OLogManager.instance().config(this, "Remote client connected from: " + connection);
+
+		return connection;
 	}
 
-	public OClientConnection getConnection(final String iChannelId) {
-		return connections.get(iChannelId);
+	public OClientConnection getConnection(final Socket socket, final int iChannelId) {
+		acquireSharedLock();
+		try {
+			OClientConnection conn = null;
+
+			// SEARCH THE CONNECTION BY ID
+			conn = connections.get(iChannelId);
+			if (conn != null && conn.getChannel().socket != socket)
+				throw new IllegalStateException("Requested sessionId " + iChannelId + " by connection " + socket
+						+ " while it's tied to connection " + conn.getChannel().socket);
+
+			return conn;
+
+		} finally {
+			releaseSharedLock();
+		}
 	}
 
-	public void onClientDisconnection(final String iChannelId) {
-		OProfiler.getInstance().updateStatistic("OServer.threads.actives", -1);
+	/**
+	 * Disconnects a client connections
+	 * 
+	 * @param iChannelId
+	 * @return true if was last one, otherwise false
+	 */
+	public boolean disconnect(final int iChannelId) {
+		OProfiler.getInstance().updateCounter("OServer.connections.actives", -1);
 
-		OClientConnection conn = connections.remove(iChannelId);
-		if (conn == null)
-			return;
-		
-		handlers.remove(iChannelId);
+		acquireExclusiveLock();
+		try {
+			final OClientConnection connection = connections.remove(iChannelId);
+
+			if (connection != null) {
+				connection.close();
+				// CHECK IF THERE ARE OTHER CONNECTIONS
+				for (Entry<Integer, OClientConnection> entry : connections.entrySet()) {
+					if (entry.getValue().getProtocol().equals(connection.getProtocol()))
+						return false;
+				}
+				return true;
+			}
+
+		} finally {
+			releaseExclusiveLock();
+		}
+		return false;
 	}
 
-	public int getExpiration() {
-		return expiration;
-	}
+	public void disconnect(final OClientConnection connection) {
+		OProfiler.getInstance().updateCounter("OServer.connections.actives", -1);
 
-	public void setExpiration(final int iExpiration) {
-		this.expiration = iExpiration;
+		connection.close();
+
+		acquireExclusiveLock();
+		try {
+			for (Entry<Integer, OClientConnection> entry : new HashMap<Integer, OClientConnection>(connections).entrySet()) {
+				if (entry.getValue().equals(connection))
+					connections.remove(entry.getKey());
+			}
+
+		} finally {
+			releaseExclusiveLock();
+		}
 	}
 
 	public static OClientConnectionManager instance() {
 		return instance;
 	}
 
-	public Map<String, OClientConnection> getConnections() {
-		return connections;
+	public List<OClientConnection> getConnections() {
+		acquireSharedLock();
+		try {
+			return new ArrayList<OClientConnection>(connections.values());
+		} finally {
+			releaseSharedLock();
+		}
 	}
 
-	public Map<String, ONetworkProtocol> getHandlers() {
-		return handlers;
+	/**
+	 * Pushes the record to all the connected clients with the same database.
+	 * 
+	 * @param iRecord
+	 *          Record to broadcast
+	 * @param iExcludeConnection
+	 *          Connection to exclude if any, usually the current where the change has been just applied
+	 */
+	public void broadcastRecord2Clients(final ORecordInternal<?> iRecord, final OClientConnection iExcludeConnection)
+			throws InterruptedException, IOException {
+		acquireSharedLock();
+		try {
+			final String dbName = iRecord.getDatabase().getName();
+
+			for (OClientConnection c : connections.values()) {
+				if (c != iExcludeConnection) {
+					final ONetworkProtocolBinary p = (ONetworkProtocolBinary) c.protocol;
+					final OChannelBinary channel = (OChannelBinary) p.getChannel();
+
+					if (c.database != null && c.database.getName().equals(dbName))
+						synchronized (c.records2Push) {
+							channel.acquireExclusiveLock();
+							try {
+								channel.writeByte(OChannelBinaryProtocol.PUSH_DATA);
+								channel.writeInt(Integer.MIN_VALUE);
+								channel.writeByte(OChannelBinaryProtocol.REQUEST_PUSH_RECORD);
+								p.writeIdentifiable(iRecord);
+							} finally {
+								channel.releaseExclusiveLock();
+							}
+						}
+
+				}
+			}
+
+		} finally {
+			releaseSharedLock();
+		}
+	}
+
+	/**
+	 * Retrieves the connection by address/port.
+	 * 
+	 * @param iAddress
+	 *          The address as string in the format address as format <ip>:<port>
+	 * @return The connection if any, otherwise null
+	 */
+	public OClientConnection getConnection(final String iAddress) {
+		acquireSharedLock();
+		try {
+			for (OClientConnection conn : connections.values()) {
+				if (iAddress.equals(conn.getRemoteAddress()))
+					return conn;
+			}
+			return null;
+		} finally {
+			releaseSharedLock();
+		}
 	}
 }

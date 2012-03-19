@@ -41,6 +41,8 @@ public class TcpServer {
 			while (true) {
 				// listen for and accept a client connection to serverSocket
 				Socket sock = this.serverSocket.accept();
+				sock.setSendBufferSize(65000);
+
 				InputStream iStream = sock.getInputStream();
 				OutputStream oStream = sock.getOutputStream();
 				ObjectOutputStream ooStream = new ObjectOutputStream(oStream);
@@ -76,6 +78,7 @@ public class TcpServer {
 			System.err.println("Unable to read data from an open socket.");
 			System.err.println(ioe.toString());
 		} catch (InterruptedException ie) {
+			Thread.currentThread().interrupt();
 		} // Thread sleep interrupted
 		finally {
 			try {

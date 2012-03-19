@@ -17,36 +17,81 @@ package com.orientechnologies.orient.enterprise.channel.binary;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketAddress;
 
-public class OChannelBinaryClient extends OChannelBinary {
-	protected int	timeout	= 5000; // IN MS
+import com.orientechnologies.orient.core.config.OContextConfiguration;
+import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 
-	public OChannelBinaryClient(String remoteHost, int remotePort, int iTimeout) throws IOException {
-		super(new Socket());
-		timeout = iTimeout;
+public class OChannelBinaryClient extends OChannelBinaryAsynch {
+	final protected int	timeout;						// IN MS
+	final private short	srvProtocolVersion;
+
+	public OChannelBinaryClient(final String remoteHost, final int remotePort, final OContextConfiguration iConfig,
+			final int iProtocolVersion) throws IOException {
+		super(new Socket(), iConfig);
+		timeout = iConfig.getValueAsInteger(OGlobalConfiguration.NETWORK_SOCKET_TIMEOUT);
 
 		socket.setPerformancePreferences(0, 2, 1);
-		socket.setSendBufferSize(DEFAULT_BUFFER_SIZE);
-		socket.setReceiveBufferSize(DEFAULT_BUFFER_SIZE);
 
-		socket.connect(new InetSocketAddress(remoteHost, remotePort), timeout);
+		socket.setKeepAlive(true);
+		socket.setSendBufferSize(socketBufferSize);
+		socket.setReceiveBufferSize(socketBufferSize);
+		try {
+			socket.connect(new InetSocketAddress(remoteHost, remotePort), timeout);
+		} catch (java.net.SocketTimeoutException e) {
+			throw new IOException("Cannot connect to host " + remoteHost + ":" + remotePort, e);
+		}
 
-		inStream = new BufferedInputStream(socket.getInputStream(), DEFAULT_BUFFER_SIZE);
-		outStream = new BufferedOutputStream(socket.getOutputStream(), DEFAULT_BUFFER_SIZE);
+		inStream = new BufferedInputStream(socket.getInputStream(), socketBufferSize);
+		outStream = new BufferedOutputStream(socket.getOutputStream(), socketBufferSize);
 
-		in = new ObjectInputStream(inStream);
-		out = new ObjectOutputStream(outStream);
+		in = new DataInputStream(inStream);
+		out = new DataOutputStream(outStream);
+
+		try {
+			srvProtocolVersion = readShort();
+		} catch (IOException e) {
+			throw new ONetworkProtocolException("Cannot read protocol version from remote server " + socket.getRemoteSocketAddress()
+					+ ": " + e);
+		}
+
+		if (Math.abs(srvProtocolVersion - iProtocolVersion) > 2) {
+			close();
+			throw new ONetworkProtocolException("Binary protocol is incompatible with the Server connected: client=" + iProtocolVersion
+					+ ", server=" + srvProtocolVersion);
+		}
+
 	}
 
 	public void reconnect() throws IOException {
 		SocketAddress address = socket.getRemoteSocketAddress();
 		socket.close();
 		socket.connect(address, timeout);
+	}
+
+	/**
+	 * Tells if the channel is connected.
+	 * 
+	 * @return true if it's connected, otherwise false.
+	 */
+	public boolean isConnected() {
+		if (socket != null && socket.isConnected() && !socket.isInputShutdown() && !socket.isOutputShutdown()) {
+			// try {
+			// out.flush();
+			return true;
+			// } catch (IOException e) {
+			// }
+		}
+
+		return false;
+	}
+
+	public short getSrvProtocolVersion() {
+		return srvProtocolVersion;
 	}
 }

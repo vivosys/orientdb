@@ -19,46 +19,27 @@ import java.io.IOException;
 import java.net.Socket;
 
 import com.orientechnologies.common.thread.OSoftThread;
+import com.orientechnologies.orient.core.config.OContextConfiguration;
 import com.orientechnologies.orient.enterprise.channel.OChannel;
-import com.orientechnologies.orient.server.OClientConnection;
+import com.orientechnologies.orient.server.OServer;
 
 public abstract class ONetworkProtocol extends OSoftThread {
-	protected int			totalRequests							= 0;
-	protected int			commandType								= -1;
-	protected int			lastCommandType						= -1;
-	protected String	lastCommandDetail					= null;
-	protected long		totalCommandExecutionTime	= 0;
-	protected long		lastCommandExecutionTime	= 0;
+	protected OServer	server;
 
 	public ONetworkProtocol(ThreadGroup group, String name) {
 		super(group, name);
 	}
 
-	public abstract void config(Socket iSocket, OClientConnection iConnection) throws IOException;
+	public abstract void config(OServer iServer, Socket iSocket, OContextConfiguration iConfiguration) throws IOException;
+
+	public abstract String getType();
 
 	public abstract OChannel getChannel();
 
-	public int getCommandType() {
-		return commandType;
+	public void registerCommand(final Object iServerCommandInstance) {
 	}
 
-	public int getLastCommandType() {
-		return lastCommandType;
-	}
-
-	public String getLastCommandDetail() {
-		return lastCommandDetail;
-	}
-
-	public long getTotalWorkingTime() {
-		return totalCommandExecutionTime;
-	}
-
-	public long getLastCommandExecutionTime() {
-		return lastCommandExecutionTime;
-	}
-
-	public int getTotalRequests() {
-		return totalRequests;
+	public OServer getServer() {
+		return server;
 	}
 }

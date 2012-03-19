@@ -19,23 +19,19 @@ import org.testng.Assert;
 import org.testng.annotations.Parameters;
 import org.testng.annotations.Test;
 
-import com.orientechnologies.orient.client.remote.OEngineRemote;
-import com.orientechnologies.orient.core.Orient;
 import com.orientechnologies.orient.core.db.record.ODatabaseFlat;
-import com.orientechnologies.orient.core.iterator.ORecordIterator;
 import com.orientechnologies.orient.core.record.impl.ORecordFlat;
 
 @Test(groups = { "crud", "record-csv" }, sequential = true)
 public class CRUDFlatPhysicalTest {
 	private static final String	CLUSTER_NAME	= "binary";
-	protected static final int	TOT_RECORDS		= 1000;
+	protected static final int	TOT_RECORDS		= 100;
 	protected long							startRecordNumber;
 	private ODatabaseFlat				database;
 	private ORecordFlat					record;
 
 	@Parameters(value = "url")
 	public CRUDFlatPhysicalTest(String iURL) {
-		Orient.instance().registerEngine(new OEngineRemote());
 
 		database = new ODatabaseFlat(iURL);
 		record = database.newInstance();
@@ -70,8 +66,7 @@ public class CRUDFlatPhysicalTest {
 		String[] fields;
 
 		int i = 0;
-		ORecordIterator<ORecordFlat> it = database.browseCluster(CLUSTER_NAME);
-		for (ORecordFlat rec = it.begin().next(); rec != null; rec = it.next()) {
+		for (ORecordFlat rec : database.browseCluster(CLUSTER_NAME)) {
 			fields = rec.value().split("-");
 
 			Assert.assertEquals(Integer.parseInt(fields[0]), i);
@@ -79,7 +74,7 @@ public class CRUDFlatPhysicalTest {
 			i++;
 		}
 
-		Assert.assertTrue(i == TOT_RECORDS);
+		Assert.assertEquals(i, TOT_RECORDS);
 
 		database.close();
 	}

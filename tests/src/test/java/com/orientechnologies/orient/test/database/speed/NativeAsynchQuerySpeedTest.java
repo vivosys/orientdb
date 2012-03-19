@@ -18,14 +18,10 @@ package com.orientechnologies.orient.test.database.speed;
 import java.io.UnsupportedEncodingException;
 
 import com.orientechnologies.common.test.SpeedTestMonoThread;
-import com.orientechnologies.orient.client.remote.OEngineRemote;
-import com.orientechnologies.orient.core.Orient;
 import com.orientechnologies.orient.core.command.OCommandResultListener;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 import com.orientechnologies.orient.core.query.nativ.ONativeAsynchQuery;
-import com.orientechnologies.orient.core.query.nativ.OQueryContextNativeSchema;
-import com.orientechnologies.orient.core.record.ORecord;
-import com.orientechnologies.orient.core.record.impl.ODocument;
+import com.orientechnologies.orient.core.query.nativ.OQueryContextNative;
 import com.orientechnologies.orient.test.database.base.OrientTest;
 
 public class NativeAsynchQuerySpeedTest extends SpeedTestMonoThread implements OCommandResultListener {
@@ -34,23 +30,22 @@ public class NativeAsynchQuerySpeedTest extends SpeedTestMonoThread implements O
 
 	public NativeAsynchQuerySpeedTest() {
 		super(1);
-		Orient.instance().registerEngine(new OEngineRemote());
 	}
 
+	@Override
 	public void cycle() throws UnsupportedEncodingException {
 
-		new ONativeAsynchQuery<ODocument, OQueryContextNativeSchema<ODocument>>(database, "Animal",
-				new OQueryContextNativeSchema<ODocument>(), this) {
+		new ONativeAsynchQuery<OQueryContextNative>(database, "Animal", new OQueryContextNative(), this) {
 
 			@Override
-			public boolean filter(OQueryContextNativeSchema<ODocument> iRecord) {
+			public boolean filter(OQueryContextNative iRecord) {
 				return iRecord.column("id").toInt().minor(10).go();
 			}
-		}.execute();
+		}.run();
 	}
 
 	public boolean result(final Object iRecord) {
-		OrientTest.printRecord(resultCount++, (ORecord<?>) iRecord);
+		OrientTest.printRecord(resultCount++, iRecord);
 		return true;
 	}
 }

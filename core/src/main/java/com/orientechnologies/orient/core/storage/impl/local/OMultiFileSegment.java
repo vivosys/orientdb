@@ -27,15 +27,16 @@ import com.orientechnologies.orient.core.storage.fs.OFile;
 import com.orientechnologies.orient.core.storage.fs.OFileFactory;
 
 public class OMultiFileSegment extends OSegment {
-	protected OFile[]											files	= new OFile[0];
-	private String												fileExtension;
-	private String												type;
-	private long													maxSize;
-	private String												defrag;
-	private int														fileStartSize;
-	private int														fileMaxSize;
-	private int														fileIncrementSize;
-	private OStorageSegmentConfiguration	config;
+	protected OStorageSegmentConfiguration	config;
+	protected OFile[]												files	= new OFile[0];
+	private final String										fileExtension;
+	private final String										type;
+	private final long											maxSize;
+	@SuppressWarnings("unused")
+	private final String										defrag;
+	private int															fileStartSize;
+	private int															fileMaxSize;
+	private final int												fileIncrementSize;
 
 	public OMultiFileSegment(final OStorageLocal iStorage, final OStorageSegmentConfiguration iConfig, final String iFileExtension,
 			final int iRoundMaxSize) throws IOException {
@@ -52,7 +53,7 @@ public class OMultiFileSegment extends OSegment {
 
 		if (iRoundMaxSize > 0)
 			// ROUND THE FILE SIZE TO AVOID ERRORS ON ROUNDING BY DIVIDING FOR FIXED RECORD SIZE
-			fileMaxSize = ((int) fileMaxSize / iRoundMaxSize) * iRoundMaxSize;
+			fileMaxSize = (fileMaxSize / iRoundMaxSize) * iRoundMaxSize;
 
 		// INSTANTIATE ALL THE FILES
 		int perFileMaxSize;
@@ -60,18 +61,19 @@ public class OMultiFileSegment extends OSegment {
 		if (iConfig.infoFiles.length == 0) {
 			// EMPTY FILE: CREATE THE FIRST FILE BY DEFAULT
 			files = new OFile[1];
-			files[0] = OFileFactory.create(type, iStorage.getVariableParser().resolveVariables(
-					storage.getStoragePath() + "/" + name + "." + 0 + fileExtension), iStorage.getMode());
-			perFileMaxSize = (int) fileMaxSize;
+			files[0] = OFileFactory.instance().create(type,
+					iStorage.getVariableParser().resolveVariables(storage.getStoragePath() + "/" + name + "." + 0 + fileExtension),
+					iStorage.getMode());
+			perFileMaxSize = fileMaxSize;
 			files[0].setMaxSize(perFileMaxSize);
 			files[0].setIncrementSize(fileIncrementSize);
 
 		} else {
 			files = new OFile[iConfig.infoFiles.length];
 			for (int i = 0; i < files.length; ++i) {
-				files[i] = OFileFactory.create(type, iStorage.getVariableParser().resolveVariables(iConfig.infoFiles[i].path), iStorage
-						.getMode());
-				perFileMaxSize = (int) fileMaxSize;
+				files[i] = OFileFactory.instance().create(type, iStorage.getVariableParser().resolveVariables(iConfig.infoFiles[i].path),
+						iStorage.getMode());
+				perFileMaxSize = fileMaxSize;
 
 				files[i].setMaxSize(perFileMaxSize);
 				files[i].setIncrementSize(fileIncrementSize);
@@ -80,13 +82,12 @@ public class OMultiFileSegment extends OSegment {
 	}
 
 	public void open() throws IOException {
+		// @TODO: LAZY OPEN FILES
 		for (OFile file : files)
 			if (!file.open()) {
 				// LAST TIME THE FILE WAS NOT CLOSED IN SOFT WAY
-				OLogManager.instance().warn(
-						this,
-						"Segment file " + OFileUtils.getPath(file.getOsFile().getName())
-								+ " was not closed correctly last time. Checking segments...");
+				OLogManager.instance().warn(this,
+						"Segment file " + OFileUtils.getPath(file.getName()) + " was not closed correctly last time. Checking segments...");
 				OLogManager.instance().warn(this, "OK");
 			}
 	}
@@ -99,13 +100,13 @@ public class OMultiFileSegment extends OSegment {
 	 */
 	public void create(final int iStartSize) throws IOException {
 		files = new OFile[1];
+		fileStartSize = iStartSize;
 		createNewFile();
 	}
 
 	public void close() throws IOException {
+		acquireExclusiveLock();
 		try {
-			acquireExclusiveLock();
-
 			for (OFile file : files) {
 				if (file != null)
 					file.close();
@@ -116,12 +117,52 @@ public class OMultiFileSegment extends OSegment {
 		}
 	}
 
-	public void synch() {
+	public void delete() throws IOException {
+		acquireExclusiveLock();
 		try {
-			acquireSharedLock();
-
 			for (OFile file : files) {
 				if (file != null)
+					file.delete();
+			}
+		} finally {
+			releaseExclusiveLock();
+		}
+	}
+
+	public void truncate() throws IOException {
+		acquireExclusiveLock();
+		try {
+			// SHRINK TO 0
+			files[0].shrink(0);
+
+			if (files.length > 1) {
+				// LEAVE JUST ONE FILE
+				for (int i = 1; i < files.length; ++i) {
+					if (files[i] != null)
+						files[i].delete();
+				}
+
+				// UPDATE FILE STRUCTURE
+				final OFile f = files[0];
+				files = new OFile[1];
+				files[0] = f;
+
+				// UPDATE CONFIGURATION
+				final OStorageFileConfiguration fileConfig = config.infoFiles[0];
+				config.infoFiles = new OStorageFileConfiguration[1];
+				config.infoFiles[0] = fileConfig;
+				config.root.update();
+			}
+		} finally {
+			releaseExclusiveLock();
+		}
+	}
+
+	public void synch() throws IOException {
+		acquireSharedLock();
+		try {
+			for (OFile file : files) {
+				if (file != null && file.isOpen())
 					file.synch();
 			}
 
@@ -131,10 +172,9 @@ public class OMultiFileSegment extends OSegment {
 	}
 
 	public long getFilledUpTo() {
+		acquireSharedLock();
 		try {
-			acquireSharedLock();
-
-			int filled = 0;
+			long filled = 0;
 			for (OFile file : files)
 				filled += file.getFilledUpTo();
 
@@ -146,10 +186,9 @@ public class OMultiFileSegment extends OSegment {
 	}
 
 	public long getSize() {
+		acquireSharedLock();
 		try {
-			acquireSharedLock();
-
-			int size = 0;
+			long size = 0;
 			for (OFile file : files)
 				size += file.getFileSize();
 
@@ -167,9 +206,7 @@ public class OMultiFileSegment extends OSegment {
 	 * @return a pair file-id/file-pos
 	 * @throws IOException
 	 */
-	protected int[] allocateSpace(final int iRecordSize) throws IOException {
-		// TODO: RECYCLE THE HOLES IF ANY
-
+	protected long[] allocateSpace(final int iRecordSize) throws IOException {
 		// IT'S PREFEREABLE TO FIND SPACE WITHOUT ENLARGE ANY FILES: FIND THE FIRST FILE WITH FREE SPACE TO USE
 		OFile file;
 		for (int i = 0; i < files.length; ++i) {
@@ -177,7 +214,7 @@ public class OMultiFileSegment extends OSegment {
 
 			if (file.getFreeSpace() >= iRecordSize)
 				// FOUND: RETURN THIS OFFSET
-				return new int[] { i, file.allocateSpace(iRecordSize) };
+				return new long[] { i, file.allocateSpace(iRecordSize) };
 		}
 
 		// NOT FOUND: CHECK IF CAN OVERSIZE SOME FILES
@@ -186,7 +223,7 @@ public class OMultiFileSegment extends OSegment {
 
 			if (file.canOversize(iRecordSize)) {
 				// FOUND SPACE: ENLARGE IT
-				return new int[] { i, file.allocateSpace(iRecordSize) };
+				return new long[] { i, file.allocateSpace(iRecordSize) };
 			}
 		}
 
@@ -206,7 +243,9 @@ public class OMultiFileSegment extends OSegment {
 		file = createNewFile();
 		file.allocateSpace(iRecordSize);
 
-		return new int[] { files.length - 1, 0 };
+		config.root.update();
+
+		return new long[] { files.length - 1, 0 };
 	}
 
 	/**
@@ -216,7 +255,7 @@ public class OMultiFileSegment extends OSegment {
 	 *          as pair file-id/file-pos
 	 * @return
 	 */
-	protected long getAbsolutePosition(final int[] iFilePosition) {
+	protected long getAbsolutePosition(final long[] iFilePosition) {
 		long position = 0;
 		for (int i = 0; i < iFilePosition[0]; ++i) {
 			position += fileMaxSize;
@@ -224,15 +263,15 @@ public class OMultiFileSegment extends OSegment {
 		return position + iFilePosition[1];
 	}
 
-	protected int[] getRelativePosition(final long iPosition) {
+	protected long[] getRelativePosition(final long iPosition) {
 		if (iPosition < fileMaxSize)
-			return new int[] { 0, (int) iPosition };
+			return new long[] { 0l, iPosition };
 
 		final int fileNum = (int) (iPosition / fileMaxSize);
 
 		if (fileNum >= files.length)
 			throw new ODatabaseException("Record position #" + iPosition + " was bound to file #" + fileNum
-					+ " that is out if limit (current=" + files.length + ")");
+					+ " that is out of limit (files range 0-" + (files.length - 1) + ")");
 
 		final int fileRec = (int) (iPosition % fileMaxSize);
 
@@ -240,15 +279,15 @@ public class OMultiFileSegment extends OSegment {
 			throw new ODatabaseException("Record position #" + iPosition + " was bound to file #" + fileNum + " but the position #"
 					+ files[fileNum].getFilledUpTo() + " is out of file size");
 
-		return new int[] { fileNum, fileRec };
+		return new long[] { fileNum, fileRec };
 	}
 
 	private OFile createNewFile() throws IOException {
 		final int num = files.length - 1;
 
-		final OFile file = OFileFactory.create(type, storage.getStoragePath() + "/" + name + "." + num + fileExtension, storage
-				.getMode());
-		file.setMaxSize((int) OFileUtils.getSizeAsNumber(config.fileMaxSize));
+		final OFile file = OFileFactory.instance().create(type, storage.getStoragePath() + "/" + name + "." + num + fileExtension,
+				storage.getMode());
+		file.setMaxSize((int) OFileUtils.getSizeAsNumber(config.root.fileTemplate.fileMaxSize));
 		file.create(fileStartSize);
 		files[num] = file;
 
@@ -257,16 +296,22 @@ public class OMultiFileSegment extends OSegment {
 		return file;
 	}
 
-	private void addInfoFileConfigEntry(final OFile file) {
+	private void addInfoFileConfigEntry(final OFile file) throws IOException {
 		OStorageFileConfiguration[] newConfigFiles = new OStorageFileConfiguration[config.infoFiles.length + 1];
 		for (int i = 0; i < config.infoFiles.length; ++i)
 			newConfigFiles[i] = config.infoFiles[i];
 		config.infoFiles = newConfigFiles;
 
 		// CREATE A NEW ENTRY FOR THE NEW FILE
-		String fileNameToStore = storage.getVariableParser().convertPathToRelative(OFileUtils.getPath(file.getOsFile().getPath()));
+		String fileNameToStore = storage.getVariableParser().convertPathToRelative(OFileUtils.getPath(file.getPath()));
 
-		config.infoFiles[config.infoFiles.length - 1] = new OStorageFileConfiguration(config, fileNameToStore, config.fileType,
-				config.fileMaxSize, config.fileIncrementSize);
+		final OStorageSegmentConfiguration template = config.root.fileTemplate;
+
+		config.infoFiles[config.infoFiles.length - 1] = new OStorageFileConfiguration(config, fileNameToStore, template.fileType,
+				template.fileMaxSize, template.fileIncrementSize);
+	}
+
+	public OStorageSegmentConfiguration getConfig() {
+		return config;
 	}
 }

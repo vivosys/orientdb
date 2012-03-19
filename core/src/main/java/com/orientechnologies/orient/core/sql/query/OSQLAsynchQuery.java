@@ -15,20 +15,21 @@
  */
 package com.orientechnologies.orient.core.sql.query;
 
+import com.orientechnologies.orient.core.command.OCommandContext;
 import com.orientechnologies.orient.core.command.OCommandRequestAsynch;
 import com.orientechnologies.orient.core.command.OCommandResultListener;
-import com.orientechnologies.orient.core.record.ORecordSchemaAware;
 
 /**
- * SQL asynchronous query. When executed the caller doesn't wait the the execution, rather the listener will be called foreach item
- * found in the query. OSQLAsynchQuery has been built on top of this.
+ * SQL asynchronous query. When executed the caller does not wait the the execution, rather the listener will be called for each
+ * item found in the query. OSQLAsynchQuery has been built on top of this. NOTE: if you're working with remote databases don't
+ * execute any remote call inside the callback function because the network channel is locked until the query command has finished.
  * 
  * @author Luca Garulli
  * 
  * @param <T>
  * @see OSQLSynchQuery
  */
-public class OSQLAsynchQuery<T extends ORecordSchemaAware<?>> extends OSQLQuery<T> implements OCommandRequestAsynch {
+public class OSQLAsynchQuery<T extends Object> extends OSQLQuery<T> implements OCommandRequestAsynch {
 	protected int	resultCount	= 0;
 
 	/**
@@ -52,7 +53,7 @@ public class OSQLAsynchQuery<T extends ORecordSchemaAware<?>> extends OSQLQuery<
 	}
 
 	@SuppressWarnings("unchecked")
-	public <RET> RET execute(final String iText, final Object... iArgs) {
+	public <RET> RET execute2(final String iText, final Object... iArgs) {
 		text = iText;
 		return (RET) execute(iArgs);
 	}
@@ -60,5 +61,12 @@ public class OSQLAsynchQuery<T extends ORecordSchemaAware<?>> extends OSQLQuery<
 	public T executeFirst() {
 		execute(1);
 		return null;
+	}
+
+	public OCommandContext getContext() {
+		return null;
+	}
+
+	public void setContext(OCommandContext iContext) {
 	}
 }

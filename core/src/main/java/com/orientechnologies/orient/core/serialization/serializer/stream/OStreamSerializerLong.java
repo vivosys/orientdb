@@ -20,7 +20,7 @@ import java.io.IOException;
 import com.orientechnologies.orient.core.serialization.OBinaryProtocol;
 
 public class OStreamSerializerLong implements OStreamSerializer {
-	public static final String								NAME			= "l";
+	public static final String								NAME			= "lo";
 
 	public static final OStreamSerializerLong	INSTANCE	= new OStreamSerializerLong();
 
@@ -28,11 +28,11 @@ public class OStreamSerializerLong implements OStreamSerializer {
 		return NAME;
 	}
 
-	public Object fromStream(byte[] iStream) throws IOException {
+	public Object fromStream(final byte[] iStream) throws IOException {
 		return OBinaryProtocol.bytes2long(iStream);
 	}
 
-	public byte[] toStream(Object iObject) throws IOException {
+	public byte[] toStream(final Object iObject) throws IOException {
 		return OBinaryProtocol.long2bytes((Long) iObject);
 	}
 }

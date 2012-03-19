@@ -16,33 +16,17 @@
 package com.orientechnologies.orient.core.serialization.serializer.stream;
 
 import java.io.IOException;
-import java.lang.reflect.Constructor;
 
-import com.orientechnologies.common.log.OLogManager;
-import com.orientechnologies.orient.core.db.record.ODatabaseRecord;
+import com.orientechnologies.orient.core.Orient;
 import com.orientechnologies.orient.core.exception.OSerializationException;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.id.ORecordId;
 import com.orientechnologies.orient.core.record.ORecord;
 import com.orientechnologies.orient.core.record.ORecordInternal;
 
-@SuppressWarnings("unchecked")
 public class OStreamSerializerRecord implements OStreamSerializer {
-	public static final String												NAME	= "r";
-	private ODatabaseRecord<?>												database;
-	private Constructor<? extends ORecordInternal<?>>	constructor;
-
-	public OStreamSerializerRecord(ODatabaseRecord<?> iDatabase) throws SecurityException, NoSuchMethodException {
-		database = iDatabase;
-
-		Constructor<?>[] constructors = iDatabase.getRecordType().getConstructors();
-		for (Constructor<?> c : constructors) {
-			if (c.getParameterTypes().length > 0 && ODatabaseRecord.class.isAssignableFrom(c.getParameterTypes()[0])) {
-				constructor = (Constructor<? extends ORecordInternal<?>>) c;
-				break;
-			}
-		}
-	}
+	public static final String									NAME			= "l";
+	public static final OStreamSerializerRecord	INSTANCE	= new OStreamSerializerRecord();
 
 	public String getName() {
 		return NAME;
@@ -51,31 +35,25 @@ public class OStreamSerializerRecord implements OStreamSerializer {
 	/**
 	 * Re-Create any object if the class has a public constructor that accepts a String as unique parameter.
 	 */
-	public Object fromStream(byte[] iStream) throws IOException {
+	public Object fromStream(final byte[] iStream) throws IOException {
 		if (iStream == null || iStream.length == 0)
 			// NULL VALUE
 			return null;
 
-		try {
-			ORecordInternal<?> obj = constructor.newInstance(database);
+		final ORecordInternal<?> obj = Orient.instance().getRecordFactoryManager().newInstance();
 
-			ORID rid = new ORecordId().fromStream(iStream);
+		final ORID rid = new ORecordId().fromStream(iStream);
 
-			obj.setIdentity(rid.getClusterId(), rid.getClusterPosition());
-			return obj;
-		} catch (Exception e) {
-			OLogManager.instance().error(this, "Error on unmarshalling record class: " + constructor.getDeclaringClass(), e,
-					OSerializationException.class);
-		}
-		return null;
+		obj.setIdentity(rid.getClusterId(), rid.getClusterPosition());
+		return obj;
 	}
 
-	public byte[] toStream(Object iObject) throws IOException {
+	public byte[] toStream(final Object iObject) throws IOException {
 		if (iObject == null)
 			return null;
 
 		if (((ORecord<?>) iObject).getIdentity() == null)
-			throw new OSerializationException("Can't serialize record without identity. Store it before to serialize.");
+			throw new OSerializationException("Cannot serialize record without identity. Store it before to serialize.");
 
 		return ((ORecord<?>) iObject).getIdentity().toStream();
 	}

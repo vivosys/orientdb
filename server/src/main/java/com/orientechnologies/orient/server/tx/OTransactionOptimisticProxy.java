@@ -16,124 +16,159 @@
 package com.orientechnologies.orient.server.tx;
 
 import java.io.IOException;
-import java.util.Iterator;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Map.Entry;
 
+import com.orientechnologies.orient.core.Orient;
 import com.orientechnologies.orient.core.db.record.ODatabaseRecordTx;
+import com.orientechnologies.orient.core.db.record.ORecordLazyList;
+import com.orientechnologies.orient.core.db.record.ORecordOperation;
+import com.orientechnologies.orient.core.exception.ORecordNotFoundException;
 import com.orientechnologies.orient.core.exception.OSerializationException;
 import com.orientechnologies.orient.core.exception.OTransactionException;
+import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.id.ORecordId;
-import com.orientechnologies.orient.core.tx.OTransactionAbstract;
-import com.orientechnologies.orient.core.tx.OTransactionEntry;
+import com.orientechnologies.orient.core.record.ORecord;
+import com.orientechnologies.orient.core.record.ORecordInternal;
+import com.orientechnologies.orient.core.record.impl.ODocument;
+import com.orientechnologies.orient.core.tx.OTransactionOptimistic;
+import com.orientechnologies.orient.core.tx.OTransactionRealAbstract;
 import com.orientechnologies.orient.enterprise.channel.binary.OChannelBinary;
 
-@SuppressWarnings("unchecked")
-public class OTransactionOptimisticProxy extends OTransactionAbstract<OTransactionRecordProxy> {
-	private OTransactionEntryProxy	entry					= new OTransactionEntryProxy();
-	private int											size;
-	private OChannelBinary					channel;
-	private boolean									emptyContent	= false;
+public class OTransactionOptimisticProxy extends OTransactionOptimistic {
+	private final Map<ORecordId, ORecord<?>>	createdRecords			= new HashMap<ORecordId, ORecord<?>>();
+	private final Map<ORecordId, ORecord<?>>	updatedRecords			= new HashMap<ORecordId, ORecord<?>>();
+	private final int													clientTxId;
+	private ODocument													remoteIndexEntries	= null;
+	private final OChannelBinary							channel;
 
 	public OTransactionOptimisticProxy(final ODatabaseRecordTx iDatabase, final OChannelBinary iChannel) throws IOException {
-		super(iDatabase, -1);
-
+		super(iDatabase);
 		channel = iChannel;
-		id = iChannel.readInt();
-		size = iChannel.readInt();
+		clientTxId = iChannel.readInt();
 	}
 
-	public Iterable<? extends OTransactionEntry<OTransactionRecordProxy>> getEntries() {
-
-		return new Iterable<OTransactionEntry<OTransactionRecordProxy>>() {
-
-			public Iterator<OTransactionEntry<OTransactionRecordProxy>> iterator() {
-				return new Iterator<OTransactionEntry<OTransactionRecordProxy>>() {
-					private int	current	= 1;
-
-					public boolean hasNext() {
-						if (emptyContent)
-							return false;
-
-						if (current > size)
-							// AVOID BROWSING OF RECORDS THE SECOND TIME TO BE INSERTED IN SERVER-SIDE CACHE
-							emptyContent = true;
-
-						return current <= size;
-					}
-
-					public OTransactionEntry<OTransactionRecordProxy> next() {
-						ORecordId rid = (ORecordId) entry.record.getIdentity();
-
-						try {
-							entry.status = channel.readByte();
-							rid.clusterId = channel.readShort();
-
-							switch (entry.status) {
-							case OTransactionEntry.CREATED:
-								entry.clusterName = channel.readString();
-								entry.record.stream = channel.readBytes();
-								break;
-
-							case OTransactionEntry.UPDATED:
-								rid.clusterPosition = channel.readLong();
-								entry.record.version = channel.readInt();
-								entry.record.stream = channel.readBytes();
-								break;
-
-							case OTransactionEntry.DELETED:
-								rid.clusterPosition = channel.readLong();
-								entry.record.version = channel.readInt();
-								break;
-
-							default:
-								throw new OTransactionException("Unrecognized tx command: " + entry.status);
-							}
-
-							current++;
-
-							return entry;
-						} catch (IOException e) {
-							throw new OSerializationException("Can't read transaction record from the network", e);
-						}
-					}
-
-					public void remove() {
-						throw new UnsupportedOperationException("remove");
-					}
-				};
-			}
-		};
-
-	}
-
-	public int size() {
-		return size;
-	}
-
+	@Override
 	public void begin() {
-		throw new UnsupportedOperationException("createRecord");
+		super.begin();
+
+		try {
+			setUsingLog(channel.readByte() == 1);
+
+			byte lastTxStatus;
+			for (lastTxStatus = channel.readByte(); lastTxStatus == 1; lastTxStatus = channel.readByte()) {
+				final byte recordStatus = channel.readByte();
+
+				final ORecordId rid = channel.readRID();
+
+				final byte recordType = channel.readByte();
+				final ORecordOperation entry;
+				switch (recordStatus) {
+				case ORecordOperation.CREATED:
+					entry = new OTransactionEntryProxy(recordType);
+					entry.type = recordStatus;
+
+					entry.getRecord().fill(rid, 0, channel.readBytes(), true);
+
+					// SAVE THE RECORD TO RETRIEVE THEM FOR THE NEW RID TO SEND BACK TO THE REQUESTER
+					createdRecords.put(rid.copy(), entry.getRecord());
+					break;
+
+				case ORecordOperation.UPDATED:
+					final ORecordInternal<?> newRecord = Orient.instance().getRecordFactoryManager().newInstance(recordType);
+					newRecord.fill(rid, channel.readInt(), channel.readBytes(), true);
+
+					final ORecordInternal<?> currentRecord;
+					if (newRecord.getRecordType() == ODocument.RECORD_TYPE) {
+						currentRecord = getDatabase().load(rid);
+
+						if (currentRecord == null)
+							throw new ORecordNotFoundException(rid.toString());
+
+						if(currentRecord.getRecordType() == ODocument.RECORD_TYPE )
+							((ODocument) currentRecord).merge((ODocument) newRecord, false, false);
+
+					} else
+						currentRecord = newRecord;
+					
+					currentRecord.setVersion(newRecord.getVersion());
+					
+					entry = new ORecordOperation(currentRecord, recordStatus);
+
+					// SAVE THE RECORD TO RETRIEVE THEM FOR THE NEW VERSIONS TO SEND BACK TO THE REQUESTER
+					updatedRecords.put(rid, currentRecord);
+					break;
+
+				case ORecordOperation.DELETED:
+					entry = new OTransactionEntryProxy(recordType);
+					entry.type = recordStatus;
+
+					entry.getRecord().fill(rid, channel.readInt(), null, false);
+					break;
+
+				default:
+					throw new OTransactionException("Unrecognized tx command: " + recordStatus);
+				}
+
+				// PUT IN TEMPORARY LIST TO GET FETCHED AFTER ALL FOR CACHE
+				recordEntries.put(entry.getRecord().getIdentity(), entry);
+			}
+
+			if (lastTxStatus == -1)
+				// ABORT TX
+				throw new OTransactionException("Transaction aborted by the client");
+
+			remoteIndexEntries = new ODocument(channel.readBytes());
+
+			// UNMARSHALL ALL THE RECORD AT THE END TO BE SURE ALL THE RECORD ARE LOADED IN LOCAL TX
+			for (ORecord<?> record : createdRecords.values())
+				unmarshallRecord(record);
+			for (ORecord<?> record : updatedRecords.values())
+				unmarshallRecord(record);
+
+		} catch (IOException e) {
+			rollback();
+			throw new OSerializationException("Cannot read transaction record from the network. Transaction aborted", e);
+		}
 	}
 
-	public void commit() {
-		throw new UnsupportedOperationException("createRecord");
+	@Override
+	public ORecordInternal<?> getRecord(final ORID rid) {
+		ORecordInternal<?> record = super.getRecord(rid);
+		if (record == OTransactionRealAbstract.DELETED_RECORD)
+			return null;
+		else if (record == null && rid.isNew())
+			// SEARCH BETWEEN CREATED RECORDS
+			record = (ORecordInternal<?>) createdRecords.get(rid);
+
+		return record;
 	}
 
-	public void rollback() {
-		throw new UnsupportedOperationException("createRecord");
+	@Override
+	public ODocument getIndexChanges() {
+		return remoteIndexEntries.merge(super.getIndexChanges(), true, true);
 	}
 
-	public long createRecord(final OTransactionRecordProxy iContent) {
-		throw new UnsupportedOperationException("createRecord");
+	public Map<ORecordId, ORecord<?>> getCreatedRecords() {
+		return createdRecords;
 	}
 
-	public void delete(final OTransactionRecordProxy iRecord) {
-		throw new UnsupportedOperationException("createRecord");
+	public Map<ORecordId, ORecord<?>> getUpdatedRecords() {
+		return updatedRecords;
 	}
 
-	public OTransactionRecordProxy load(final int iClusterId, final long iPosition, final OTransactionRecordProxy iRecord) {
-		throw new UnsupportedOperationException("createRecord");
-	}
+	/**
+	 * Unmarshalls collections. This prevent temporary RIDs remains stored as are.
+	 */
+	private void unmarshallRecord(final ORecord<?> iRecord) {
+		if (iRecord instanceof ODocument) {
+			((ODocument) iRecord).deserializeFields();
 
-	public void save(final OTransactionRecordProxy iContent, final String iClusterName) {
-		throw new UnsupportedOperationException("createRecord");
+			for (Entry<String, Object> field : ((ODocument) iRecord)) {
+				if (field.getValue() instanceof ORecordLazyList)
+					((ORecordLazyList) field.getValue()).lazyLoad(true);
+			}
+		}
 	}
 }

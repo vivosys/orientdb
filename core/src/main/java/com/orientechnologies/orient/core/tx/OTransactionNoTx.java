@@ -16,14 +16,29 @@
 package com.orientechnologies.orient.core.tx;
 
 import java.util.Collection;
+import java.util.List;
 
+import com.orientechnologies.common.exception.OException;
+import com.orientechnologies.orient.core.db.ODatabaseComplex.OPERATION_MODE;
 import com.orientechnologies.orient.core.db.record.ODatabaseRecordTx;
+import com.orientechnologies.orient.core.db.record.OIdentifiable;
+import com.orientechnologies.orient.core.db.record.ORecordOperation;
+import com.orientechnologies.orient.core.id.ORID;
+import com.orientechnologies.orient.core.id.ORecordId;
+import com.orientechnologies.orient.core.index.OIndex;
 import com.orientechnologies.orient.core.record.ORecordInternal;
+import com.orientechnologies.orient.core.record.impl.ODocument;
+import com.orientechnologies.orient.core.tx.OTransactionIndexChanges.OPERATION;
 
-public class OTransactionNoTx<REC extends ORecordInternal<?>> extends OTransactionAbstract<REC> {
-	public OTransactionNoTx(final ODatabaseRecordTx<REC> iDatabase, final int iId) {
-		super(iDatabase, iId);
-		status = TXSTATUS.BEGUN;
+/**
+ * No operation transaction.
+ * 
+ * @author Luca Garulli (l.garulli--at--orientechnologies.com)
+ * 
+ */
+public class OTransactionNoTx extends OTransactionAbstract {
+	public OTransactionNoTx(final ODatabaseRecordTx iDatabase) {
+		super(iDatabase);
 	}
 
 	public void begin() {
@@ -35,29 +50,130 @@ public class OTransactionNoTx<REC extends ORecordInternal<?>> extends OTransacti
 	public void rollback() {
 	}
 
-	public REC load(final int iClusterId, final long iPosition, final REC iRecord) {
-		return database.executeReadRecord(iClusterId, iPosition, iRecord);
+	public void close() {
+	}
+
+	public ORecordInternal<?> loadRecord(final ORID iRid, final ORecordInternal<?> iRecord, final String iFetchPlan) {
+		if (iRid.isNew())
+			return null;
+
+		return database.executeReadRecord((ORecordId) iRid, iRecord, iFetchPlan, false);
 	}
 
 	/**
-	 * Update the record without checking the version coherence.
+	 * Update the record.
 	 */
-	public void save(final REC iContent, final String iClusterName) {
-		database.executeSaveRecord(iContent, iClusterName, -1, iContent.getRecordType());
+	public void saveRecord(final ORecordInternal<?> iRecord, final String iClusterName, final OPERATION_MODE iMode) {
+		try {
+			database.executeSaveRecord(iRecord, iClusterName, iRecord.getVersion(), iRecord.getRecordType(), iMode);
+		} catch (Exception e) {
+			// REMOVE IT FROM THE CACHE TO AVOID DIRTY RECORDS
+			final ORecordId rid = (ORecordId) iRecord.getIdentity();
+			if (rid.isValid())
+				database.getLevel1Cache().freeRecord(rid);
+
+			if (e instanceof RuntimeException)
+				throw (RuntimeException) e;
+			throw new OException(e);
+		}
 	}
 
 	/**
-	 * Delete the record without checking the version coherence.
+	 * Deletes the record.
 	 */
-	public void delete(final REC iRecord) {
-		database.executeDeleteRecord(iRecord, -1);
+	public void deleteRecord(final ORecordInternal<?> iRecord, final OPERATION_MODE iMode) {
+		if (!iRecord.getIdentity().isPersistent())
+			return;
+
+		try {
+			database.executeDeleteRecord(iRecord, iRecord.getVersion(), true, iMode);
+		} catch (Exception e) {
+			// REMOVE IT FROM THE CACHE TO AVOID DIRTY RECORDS
+			final ORecordId rid = (ORecordId) iRecord.getIdentity();
+			if (rid.isValid())
+				database.getLevel1Cache().freeRecord(rid);
+
+			if (e instanceof RuntimeException)
+				throw (RuntimeException) e;
+			throw new OException(e);
+		}
 	}
 
-	public Collection<OTransactionEntry<REC>> getEntries() {
+	public Collection<ORecordOperation> getCurrentRecordEntries() {
 		return null;
 	}
 
-	public int size() {
+	public Collection<ORecordOperation> getAllRecordEntries() {
+		return null;
+	}
+
+	public List<ORecordOperation> getRecordEntriesByClass(String iClassName) {
+		return null;
+	}
+
+	public List<ORecordOperation> getRecordEntriesByClusterIds(int[] iIds) {
+		return null;
+	}
+
+	public void clearRecordEntries() {
+	}
+
+	public int getRecordEntriesSize() {
 		return 0;
+	}
+
+	public ORecordInternal<?> getRecord(final ORID rid) {
+		return null;
+	}
+
+	public ORecordOperation getRecordEntry(final ORID rid) {
+		return null;
+	}
+
+	public boolean isUsingLog() {
+		return false;
+	}
+
+	public void setUsingLog(final boolean useLog) {
+	}
+
+	public ODocument getIndexChanges() {
+		return null;
+	}
+
+	public OTransactionIndexChangesPerKey getIndexEntry(final String iIndexName, final Object iKey) {
+		return null;
+	}
+
+	public void addIndexEntry(final OIndex<?> delegate, final String iIndexName, final OPERATION iStatus, final Object iKey,
+			final OIdentifiable iValue) {
+		switch (iStatus) {
+		case CLEAR:
+			delegate.clear();
+			break;
+
+		case PUT:
+			delegate.put(iKey, iValue);
+			break;
+
+		case REMOVE:
+			delegate.remove(iKey, iValue);
+			break;
+		}
+	}
+
+	public void clearIndexEntries() {
+	}
+
+	public OTransactionIndexChanges getIndexChanges(final String iName) {
+		return null;
+	}
+
+	public int getId() {
+		return 0;
+	}
+
+	public List<String> getInvolvedIndexes() {
+		return null;
 	}
 }

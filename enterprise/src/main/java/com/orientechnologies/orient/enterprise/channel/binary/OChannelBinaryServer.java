@@ -31,20 +31,23 @@
 package com.orientechnologies.orient.enterprise.channel.binary;
 
 import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
 import java.net.Socket;
+
+import com.orientechnologies.orient.core.config.OContextConfiguration;
 
 public class OChannelBinaryServer extends OChannelBinary {
 
-	public OChannelBinaryServer(Socket iSocket) throws IOException {
-		super(iSocket);
+	public OChannelBinaryServer(final Socket iSocket, final OContextConfiguration iConfig) throws IOException {
+		super(iSocket, iConfig);
 
-		inStream = new BufferedInputStream(socket.getInputStream(), DEFAULT_BUFFER_SIZE);
-		outStream = socket.getOutputStream();
+		inStream = new BufferedInputStream(socket.getInputStream(), socketBufferSize);
+		outStream = new BufferedOutputStream(socket.getOutputStream(), socketBufferSize);
 
-		out = new ObjectOutputStream(outStream);
-		in = new ObjectInputStream(inStream);
+		out = new DataOutputStream(outStream);
+		in = new DataInputStream(inStream);
 	}
 }

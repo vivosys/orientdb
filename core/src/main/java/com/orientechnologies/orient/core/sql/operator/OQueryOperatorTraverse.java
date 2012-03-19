@@ -15,11 +15,22 @@
  */
 package com.orientechnologies.orient.core.sql.operator;
 
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
+import com.orientechnologies.orient.core.command.OCommandContext;
+import com.orientechnologies.orient.core.db.record.OIdentifiable;
+import com.orientechnologies.orient.core.db.record.ORecordElement;
+import com.orientechnologies.orient.core.exception.ORecordNotFoundException;
+import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.query.OQueryRuntimeValueMulti;
 import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.sql.filter.OSQLFilterCondition;
+import com.orientechnologies.orient.core.sql.filter.OSQLFilterItemFieldAny;
 
 /**
  * TRAVERSE operator.
@@ -28,20 +39,29 @@ import com.orientechnologies.orient.core.sql.filter.OSQLFilterCondition;
  * 
  */
 public class OQueryOperatorTraverse extends OQueryOperatorEqualityNotNulls {
-	private int	startDeepLevel	= 0;	// FIRST
-	private int	endDeepLevel		= -1; // INFINITE
+	private int				startDeepLevel	= 0;	// FIRST
+	private int				endDeepLevel		= -1; // INFINITE
+	private String[]	cfgFields;
 
 	public OQueryOperatorTraverse() {
 		super("TRAVERSE", 5, false);
 	}
 
-	public OQueryOperatorTraverse(final int startDeepLevel, final int endDeepLevel) {
+	public OQueryOperatorTraverse(final int startDeepLevel, final int endDeepLevel, final String[] iFieldList) {
 		this();
 		this.startDeepLevel = startDeepLevel;
 		this.endDeepLevel = endDeepLevel;
+		this.cfgFields = iFieldList;
 	}
 
-	protected boolean evaluateExpression(final OSQLFilterCondition iCondition, final Object iLeft, final Object iRight) {
+	@Override
+	public String getSyntax() {
+		return "<left> TRAVERSE[(<begin-deep-level> [,<maximum-deep-level> [,<fields>]] )] ( <conditions> )";
+	}
+
+	@Override
+	protected boolean evaluateExpression(final OIdentifiable iRecord, final OSQLFilterCondition iCondition, final Object iLeft,
+			final Object iRight, final OCommandContext iContext) {
 		final OSQLFilterCondition condition;
 		final Object target;
 
@@ -53,47 +73,107 @@ public class OQueryOperatorTraverse extends OQueryOperatorEqualityNotNulls {
 			target = iLeft;
 		}
 
-		return traverse(condition, target, 0);
+		final Set<ORID> evaluatedRecords = new HashSet<ORID>();
+		return traverse(target, condition, 0, evaluatedRecords, iContext);
 	}
 
 	@SuppressWarnings("unchecked")
-	private boolean traverse(final OSQLFilterCondition condition, final Object target, final int iLevel) {
-		if (target instanceof ODocument) {
-			if (iLevel >= startDeepLevel && (Boolean) condition.evaluate((ODocument) target) == Boolean.TRUE)
-				return true;
+	private boolean traverse(Object iTarget, final OSQLFilterCondition iCondition, final int iLevel,
+			final Set<ORID> iEvaluatedRecords, final OCommandContext iContext) {
+		if (endDeepLevel > -1 && iLevel > endDeepLevel)
+			return false;
 
-		} else {
-			if (iLevel >= endDeepLevel)
+		if (iTarget instanceof ORID) {
+			if (iEvaluatedRecords.contains(iTarget))
+				// ALREADY EVALUATED
 				return false;
 
-			if (target instanceof OQueryRuntimeValueMulti) {
+			// TRANSFORM THE ORID IN ODOCUMENT
+			iTarget = new ODocument((ORID) iTarget);
+		} else if (iTarget instanceof ODocument) {
+			if (iEvaluatedRecords.contains(((ODocument) iTarget).getIdentity()))
+				// ALREADY EVALUATED
+				return false;
+		}
 
-				OQueryRuntimeValueMulti multi = (OQueryRuntimeValueMulti) target;
-				for (Object o : multi.values) {
-					if (traverse(condition, o, iLevel + 1) == Boolean.TRUE)
-						return true;
+		if (iTarget instanceof ODocument) {
+			final ODocument target = (ODocument) iTarget;
+
+			iEvaluatedRecords.add(target.getIdentity());
+
+			if (target.getInternalStatus() == ORecordElement.STATUS.NOT_LOADED)
+				try {
+					target.load();
+				} catch (final ORecordNotFoundException e) {
+					// INVALID RID
+					return false;
 				}
-			} else if (target instanceof Collection<?>) {
 
-				Collection<ODocument> collection = (Collection<ODocument>) target;
-				for (ODocument o : collection) {
-					if (traverse(condition, o, iLevel + 1) == Boolean.TRUE)
+			if (iLevel >= startDeepLevel && (Boolean) iCondition.evaluate(target, iContext) == Boolean.TRUE)
+				return true;
+
+			// TRAVERSE THE DOCUMENT ITSELF
+			for (final String cfgField : cfgFields) {
+				if (cfgField.equalsIgnoreCase(OSQLFilterItemFieldAny.FULL_NAME)) {
+					// ANY
+					for (final String fieldName : target.fieldNames())
+						if (traverse(target.rawField(fieldName), iCondition, iLevel + 1, iEvaluatedRecords, iContext))
+							return true;
+				} else if (cfgField.equalsIgnoreCase(OSQLFilterItemFieldAny.FULL_NAME)) {
+					// ALL
+					for (final String fieldName : target.fieldNames())
+						if (!traverse(target.rawField(fieldName), iCondition, iLevel + 1, iEvaluatedRecords, iContext))
+							return false;
+					return true;
+				} else {
+					if (traverse(target.rawField(cfgField), iCondition, iLevel + 1, iEvaluatedRecords, iContext))
 						return true;
 				}
 			}
+
+		} else if (iTarget instanceof OQueryRuntimeValueMulti) {
+
+			final OQueryRuntimeValueMulti multi = (OQueryRuntimeValueMulti) iTarget;
+			for (final Object o : multi.values) {
+				if (traverse(o, iCondition, iLevel + 1, iEvaluatedRecords, iContext) == Boolean.TRUE)
+					return true;
+			}
+		} else if (iTarget instanceof Collection<?>) {
+
+			final Collection<Object> collection = (Collection<Object>) iTarget;
+			for (final Object o : collection) {
+				if (traverse(o, iCondition, iLevel + 1, iEvaluatedRecords, iContext) == Boolean.TRUE)
+					return true;
+			}
+		} else if (iTarget instanceof Map<?, ?>) {
+
+			final Map<Object, Object> map = (Map<Object, Object>) iTarget;
+			for (final Object o : map.values()) {
+				if (traverse(o, iCondition, iLevel + 1, iEvaluatedRecords, iContext) == Boolean.TRUE)
+					return true;
+			}
 		}
+
 		return false;
 	}
 
 	@Override
-	public OQueryOperator configure(String[] params) {
-		if (params == null)
+	public OQueryOperator configure(final List<String> iParams) {
+		if (iParams == null)
 			return this;
 
-		final int start = params.length > 0 ? Integer.parseInt(params[0]) : startDeepLevel;
-		final int end = params.length > 1 ? Integer.parseInt(params[1]) : endDeepLevel;
+		final int start = !iParams.isEmpty() ? Integer.parseInt(iParams.get(0)) : startDeepLevel;
+		final int end = iParams.size() > 1 ? Integer.parseInt(iParams.get(1)) : endDeepLevel;
 
-		return new OQueryOperatorTraverse(start, end);
+		String[] fields = new String[] { "any()" };
+		if (iParams.size() > 2) {
+			String f = iParams.get(2);
+			if (f.startsWith("'") || f.startsWith("\""))
+				f = f.substring(1, f.length() - 1);
+			fields = f.split(",");
+		}
+
+		return new OQueryOperatorTraverse(start, end, fields);
 	}
 
 	public int getStartDeepLevel() {
@@ -102,5 +182,29 @@ public class OQueryOperatorTraverse extends OQueryOperatorEqualityNotNulls {
 
 	public int getEndDeepLevel() {
 		return endDeepLevel;
+	}
+
+	public String[] getCfgFields() {
+		return cfgFields;
+	}
+
+	@Override
+	public OIndexReuseType getIndexReuseType(final Object iLeft, final Object iRight) {
+		return OIndexReuseType.NO_INDEX;
+	}
+
+	@Override
+	public String toString() {
+		return String.format("%s(%d,%d,%s)", keyword, startDeepLevel, endDeepLevel, Arrays.toString(cfgFields));
+	}
+
+	@Override
+	public ORID getBeginRidRange(Object iLeft, Object iRight) {
+		return null;
+	}
+
+	@Override
+	public ORID getEndRidRange(Object iLeft, Object iRight) {
+		return null;
 	}
 }

@@ -18,19 +18,20 @@ package com.orientechnologies.orient.enterprise.channel.text;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.LineNumberReader;
 import java.net.Socket;
 
+import com.orientechnologies.orient.core.config.OContextConfiguration;
+
 public class OChannelTextServer extends OChannelText {
-	public LineNumberReader	in;
+	public OChannelTextServer(final Socket iSocket, final OContextConfiguration iConfiguration) throws IOException {
+		super(iSocket, iConfiguration);
 
-	public OChannelTextServer(final Socket iSocket) throws IOException {
-		super(iSocket);
+		socket.setKeepAlive(true);
+		socket.setPerformancePreferences(1, 2, 0);
+		socket.setSendBufferSize(socketBufferSize);
+		socket.setReceiveBufferSize(socketBufferSize);
 
-		inStream = new BufferedInputStream(socket.getInputStream(), DEFAULT_BUFFER_SIZE);
-		outStream = new BufferedOutputStream(socket.getOutputStream(), DEFAULT_BUFFER_SIZE);
-
-		in = new LineNumberReader(new InputStreamReader(inStream));
+		inStream = new BufferedInputStream(socket.getInputStream(), socketBufferSize);
+		outStream = new BufferedOutputStream(socket.getOutputStream(), socketBufferSize);
 	}
 }

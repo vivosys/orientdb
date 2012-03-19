@@ -15,12 +15,10 @@
  */
 package com.orientechnologies.orient.core.config;
 
-import javax.xml.bind.annotation.XmlRootElement;
-
-@XmlRootElement(name = "tx-segment")
+@SuppressWarnings("serial")
 public class OStorageTxConfiguration extends OStorageFileConfiguration {
 	private static final String	DEF_EXTENSION				= ".otd";
-	private static final String	DEF_MAX_SIZE				= "50mb";
+	private static final String	DEF_MAX_SIZE				= "512mb";
 	private static final String	DEF_INCREMENT_SIZE	= "50%";
 
 	private boolean							synchRecord					= false;

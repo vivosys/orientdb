@@ -19,6 +19,9 @@ import org.testng.Assert;
 import org.testng.annotations.Test;
 
 import com.orientechnologies.orient.core.Orient;
+import com.orientechnologies.orient.core.config.OGlobalConfiguration;
+import com.orientechnologies.orient.core.db.document.ODatabaseDocumentPool;
+import com.orientechnologies.orient.core.db.object.ODatabaseObjectPool;
 import com.orientechnologies.orient.core.storage.OStorage;
 import com.orientechnologies.orient.test.database.base.SetupTest;
 
@@ -28,6 +31,12 @@ public class DbClosedTest {
 	public void testStorageClosed() {
 		if (SetupTest.instance().isReuseDatabase())
 			return;
+
+		if (OGlobalConfiguration.STORAGE_KEEP_OPEN.getValueAsBoolean())
+			return;
+
+		ODatabaseDocumentPool.global().close();
+		ODatabaseObjectPool.global().close();
 
 		for (OStorage stg : Orient.instance().getStorages()) {
 			Assert.assertTrue(stg.isClosed());

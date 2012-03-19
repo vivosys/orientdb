@@ -15,74 +15,60 @@
  */
 package com.orientechnologies.orient.core.dictionary;
 
-import java.util.Set;
-import java.util.Map.Entry;
+import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
+import com.orientechnologies.orient.core.db.record.OIdentifiable;
+import com.orientechnologies.orient.core.id.ORID;
+import com.orientechnologies.orient.core.index.OIndex;
+import com.orientechnologies.orient.core.record.impl.ODocument;
 
-import com.orientechnologies.orient.core.record.ORecordInternal;
+@SuppressWarnings("unchecked")
+public class ODictionary<T extends Object> {
+	private OIndex<OIdentifiable>	index;
 
-/**
- * Main TreeMap to handle pairs of Key/Values. This is the entry point for all the root objects.<br/>
- * <br/>
- * Usage:<br/>
- * <br/>
- * // BIND WITH NAME 'company'<br/>
- * db.getDictionary().put("company", company );<br/>
- * <br/>
- * // RETRIEVE IT<br/>
- * company = db.getDictionary().get("company");
- * 
- * @author Luca Garulli
- * 
- */
-public interface ODictionary<T extends Object> extends Iterable<Entry<String, T>> {
-	/**
-	 * Get a record by its key.
-	 * 
-	 * @param iKey
-	 *          Key to search
-	 * @return The Record if found, otherwise null
-	 */
-	public T get(Object iKey);
+	public ODictionary(final OIndex<OIdentifiable> iIndex) {
+		index = iIndex;
+	}
 
-	/**
-	 * Put a new association between the iKey and the iValue. If the association already exists, replace it with the new one and
-	 * return the previous value.
-	 * 
-	 * @param iKey
-	 *          Key to bind
-	 * @param iValue
-	 *          Value to bind.
-	 * @return The previous value if any, otherwise null
-	 */
-	public T put(String iKey, T iValue);
+	public <RET extends T> RET get(final String iKey) {
+		final OIdentifiable value = index.get(iKey);
+		if (value == null)
+			return null;
 
-	/**
-	 * Check if the dictionary contains a key.
-	 * 
-	 * @param iKey
-	 *          Key to search
-	 * @return True if found, otherwise false
-	 */
-	public boolean containsKey(Object iKey);
+		return (RET) value.getRecord();
+	}
 
-	/**
-	 * Remove an entry if exists.
-	 * 
-	 * @param iKey
-	 *          Key to remove
-	 * @return The Value associated with the key if found, otherwise null
-	 */
-	public T remove(Object iKey);
+	public <RET extends T> RET get(final String iKey, final String iFetchPlan) {
+		final OIdentifiable value = index.get(iKey);
+		if (value == null)
+			return null;
 
-	/**
-	 * Return the total number of elements in the dictionary.
-	 */
-	public int size();
+		if (value instanceof ORID)
+			return (RET) ODatabaseRecordThreadLocal.INSTANCE.get().load(((ORID) value), iFetchPlan);
 
-	/**
-	 * Return the set of all the keys.
-	 */
-	public Set<String> keySet();
+		return (RET) ((ODocument) value).load(iFetchPlan);
+	}
 
-	public ORecordInternal<?> putRecord(String iKey, ORecordInternal<?> iValue);
+	public void put(final String iKey, final Object iValue) {
+		index.put(iKey, (OIdentifiable) iValue);
+	}
+
+	public boolean containsKey(final String iKey) {
+		return index.contains(iKey);
+	}
+
+	public boolean remove(final String iKey) {
+		return index.remove(iKey);
+	}
+
+	public long size() {
+		return index.getSize();
+	}
+
+	public Iterable<Object> keys() {
+		return index.keys();
+	}
+
+	public OIndex<OIdentifiable> getIndex() {
+		return index;
+	}
 }

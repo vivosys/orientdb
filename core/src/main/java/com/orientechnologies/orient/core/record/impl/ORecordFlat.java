@@ -15,10 +15,13 @@
  */
 package com.orientechnologies.orient.core.record.impl;
 
+import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
+import com.orientechnologies.orient.core.db.record.ODatabaseFlat;
 import com.orientechnologies.orient.core.db.record.ODatabaseRecord;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.id.ORecordId;
 import com.orientechnologies.orient.core.record.ORecordAbstract;
+import com.orientechnologies.orient.core.record.ORecordInternal;
 import com.orientechnologies.orient.core.record.ORecordStringable;
 import com.orientechnologies.orient.core.serialization.OBinaryProtocol;
 
@@ -26,36 +29,39 @@ import com.orientechnologies.orient.core.serialization.OBinaryProtocol;
  * It's schema less. Use this if you need to store Strings at low level. The object can be reused across calls to the database by
  * using the reset() at every re-use.
  */
-@SuppressWarnings("unchecked")
+@SuppressWarnings({ "unchecked", "serial" })
 public class ORecordFlat extends ORecordAbstract<String> implements ORecordStringable {
 	protected String					value;
 
 	public static final byte	RECORD_TYPE	= 'f';
 
+	public ORecordFlat(ODatabaseFlat iDatabase) {
+		this();
+		ODatabaseRecordThreadLocal.INSTANCE.set(iDatabase);
+	}
+
 	public ORecordFlat() {
 		setup();
 	}
 
-	public ORecordFlat(ODatabaseRecord<?> iDatabase) {
-		super(iDatabase);
+	public ORecordFlat(final byte[] iSource) {
+		super(iSource);
 		setup();
 	}
 
-	public ORecordFlat(ODatabaseRecord<?> iDatabase, byte[] iSource) {
-		super(iDatabase, iSource);
-		setup();
+	public ORecordFlat(final ODatabaseRecord iDatabase, final ORID iRID) {
+		_recordId = (ORecordId) iRID;
 	}
 
-	public ORecordFlat(ODatabaseRecord<?> iDatabase, ORID iRID) {
-		this(iDatabase);
-		recordId = (ORecordId) iRID;
-	}
-
-	public ORecordFlat value(String iValue) {
+	public ORecordFlat value(final String iValue) {
 		value = iValue;
-		source = null;
 		setDirty();
 		return this;
+	}
+
+	@Override
+	public void unsetDirty() {
+		super.unsetDirty();
 	}
 
 	@Override
@@ -65,24 +71,38 @@ public class ORecordFlat extends ORecordAbstract<String> implements ORecordStrin
 		return this;
 	}
 
+	@Override
+	public ORecordFlat unload() {
+		super.unload();
+		value = null;
+		return this;
+	}
+
+	@Override
+	public ORecordFlat clear() {
+		super.clear();
+		value = null;
+		return this;
+	}
+
 	public ORecordFlat copy() {
 		ORecordFlat cloned = new ORecordFlat();
-		cloned.source = source;
+		cloned._source = _source;
 		cloned.value = value;
-		cloned.database = database;
-		cloned.recordId = recordId.copy();
-		setDirty();
+		cloned._recordId = _recordId.copy();
+		cloned._dirty = _dirty;
+		cloned._version = _version;
 		return cloned;
 	}
 
 	public String value() {
 		if (value == null) {
 			// LAZY DESERIALIZATION
-			if (source == null && getIdentity() != null && getIdentity().isValid())
-				load();
+			if (_source == null && getIdentity() != null && getIdentity().isValid())
+				reload();
 
 			// LAZY LOADING: LOAD THE RECORD FIRST
-			value = OBinaryProtocol.bytes2string(source);
+			value = OBinaryProtocol.bytes2string(_source);
 		}
 
 		return value;
@@ -90,18 +110,27 @@ public class ORecordFlat extends ORecordAbstract<String> implements ORecordStrin
 
 	@Override
 	public String toString() {
-		return value();
+		return super.toString() + " " + value();
+	}
+
+	@Override
+	public ORecordInternal<String> reload() {
+		value = null;
+		return super.reload();
+	}
+
+	@Override
+	public ORecordAbstract<String> fromStream(final byte[] iRecordBuffer) {
+		super.fromStream(iRecordBuffer);
+		value = null;
+		return this;
 	}
 
 	@Override
 	public byte[] toStream() {
-		return OBinaryProtocol.string2bytes(value());
-	}
-
-	@Override
-	public ORecordFlat fromStream(byte[] iRecordBuffer) {
-		super.fromStream(iRecordBuffer);
-		return this;
+		if (_source == null && value != null)
+			_source = OBinaryProtocol.string2bytes(value);
+		return _source;
 	}
 
 	public int size() {

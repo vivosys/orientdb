@@ -16,10 +16,15 @@
 package com.orientechnologies.orient.core.db;
 
 import java.util.Collection;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.concurrent.Callable;
 
-import com.orientechnologies.orient.core.cache.OCacheRecord;
+import com.orientechnologies.orient.core.cache.OLevel1RecordCache;
+import com.orientechnologies.orient.core.cache.OLevel2RecordCache;
 import com.orientechnologies.orient.core.intent.OIntent;
 import com.orientechnologies.orient.core.storage.OStorage;
+import com.orientechnologies.orient.core.storage.OStorage.CLUSTER_TYPE;
 
 /**
  * Generic Database interface. Represents the lower level of the Database providing raw API to access to the raw records.<br/>
@@ -37,6 +42,18 @@ import com.orientechnologies.orient.core.storage.OStorage;
  * 
  */
 public interface ODatabase {
+	public static enum OPTIONS {
+		SECURITY
+	}
+
+	public static enum STATUS {
+		OPEN, CLOSED, IMPORTING
+	}
+
+	public static enum ATTRIBUTES {
+		STATUS
+	}
+
 	/**
 	 * Opens a database using the user and password received as arguments.
 	 * 
@@ -56,14 +73,31 @@ public interface ODatabase {
 	public <DB extends ODatabase> DB create();
 
 	/**
+	 * Reloads the database information like the cluster list.
+	 */
+	public void reload();
+
+	/**
+	 * Drops a database.
+	 * 
+	 */
+	public void drop();
+
+	/**
+	 * Deletes a database.
+	 * 
+	 * @see #drop()
+	 */
+	@Deprecated
+	public void delete();
+
+	/**
 	 * Declares an intent to the database. Intents aim to optimize common use cases.
 	 * 
 	 * @param iIntent
 	 *          The intent
-	 * @param iParams
-	 *          Additional parameters
 	 */
-	public void declareIntent(OIntent iIntent, Object... iParams);
+	public boolean declareIntent(final OIntent iIntent);
 
 	/**
 	 * Checks if the database exists.
@@ -78,11 +112,14 @@ public interface ODatabase {
 	public void close();
 
 	/**
-	 * Returns the database id. The id is auto-generated on opening and creation and it's unique in the current JVM.
-	 * 
-	 * @return
+	 * Returns the current status of database.
 	 */
-	public int getId();
+	public STATUS getStatus();
+
+	/**
+	 * Returns the current status of database.
+	 */
+	public <DB extends ODatabase> DB setStatus(STATUS iStatus);
 
 	/**
 	 * Returns the database name.
@@ -90,6 +127,13 @@ public interface ODatabase {
 	 * @return Name of the database
 	 */
 	public String getName();
+
+	/**
+	 * Returns the database URL.
+	 * 
+	 * @return URL of the database
+	 */
+	public String getURL();
 
 	/**
 	 * Returns the underlying storage implementation.
@@ -100,11 +144,18 @@ public interface ODatabase {
 	public OStorage getStorage();
 
 	/**
-	 * Returns the database cache. Can't be null.
+	 * Returns the level1 cache. Cannot be null.
 	 * 
 	 * @return Current cache.
 	 */
-	public OCacheRecord getCache();
+	public OLevel1RecordCache getLevel1Cache();
+
+	/**
+	 * Returns the level1 cache. Cannot be null.
+	 * 
+	 * @return Current cache.
+	 */
+	public OLevel2RecordCache getLevel2Cache();
 
 	/**
 	 * Returns the default cluster id. If not specified all the new entities will be stored in the default cluster.
@@ -112,6 +163,13 @@ public interface ODatabase {
 	 * @return The default cluster id
 	 */
 	public int getDefaultClusterId();
+
+	/**
+	 * Returns the number of clusters
+	 * 
+	 * @return Number of the clusters
+	 */
+	public int getClusters();
 
 	/**
 	 * Returns all the names of the clusters.
@@ -130,6 +188,15 @@ public interface ODatabase {
 	public int getClusterIdByName(String iClusterName);
 
 	/**
+	 * Returns the cluster type.
+	 * 
+	 * @param iClusterName
+	 *          Cluster name
+	 * @return The cluster type as string
+	 */
+	public String getClusterType(String iClusterName);
+
+	/**
 	 * Returns the cluster name by id.
 	 * 
 	 * @param iClusterId
@@ -137,6 +204,24 @@ public interface ODatabase {
 	 * @return The name of searched cluster.
 	 */
 	public String getClusterNameById(int iClusterId);
+
+	/**
+	 * Returns the total size of records contained in the cluster defined by its name.
+	 * 
+	 * @param iClusterName
+	 *          Cluster name
+	 * @return Total size of records contained.
+	 */
+	public long getClusterRecordSizeByName(String iClusterName);
+
+	/**
+	 * Returns the total size of records contained in the cluster defined by its id.
+	 * 
+	 * @param iClusterId
+	 *          Cluster id
+	 * @return The name of searched cluster.
+	 */
+	public long getClusterRecordSizeById(int iClusterId);
 
 	/**
 	 * Checks if the database is closed.
@@ -172,8 +257,10 @@ public interface ODatabase {
 	 */
 	public long countClusterElements(String iClusterName);
 
+	public int addCluster(String iClusterName, CLUSTER_TYPE iType);
+
 	/**
-	 * Adds a logical cluster. Logical clusters don't need separate files since are stored inside a OTreeMap instance. Access is
+	 * Adds a logical cluster. Logical clusters don't need separate files since are stored inside a OMVRBTree instance. Access is
 	 * slower than the physical cluster but the database size is reduced and less files are requires. This matters in some OS where a
 	 * single process has limitation for the number of files can open. Most accessed entities should be stored inside a physical
 	 * cluster.
@@ -184,6 +271,7 @@ public interface ODatabase {
 	 *          Physical cluster where to store all the entities of this logical cluster
 	 * @return Cluster id
 	 */
+	@Deprecated
 	public int addLogicalCluster(String iClusterName, int iPhyClusterContainerId);
 
 	/**
@@ -200,18 +288,85 @@ public interface ODatabase {
 	public int addPhysicalCluster(String iClusterName, String iClusterFileName, int iStartSize);
 
 	/**
+	 * 
+	 * Drops a cluster by its name. Physical clusters will be completely deleted
+	 * 
+	 * @param iClusterName
+	 * @return
+	 */
+	public boolean dropCluster(String iClusterName);
+
+	/**
+	 * Drops a cluster by its id. Physical clusters will be completely deleted.
+	 * 
+	 * @param iClusterId
+	 * @return true if has been removed, otherwise false
+	 */
+	public boolean dropCluster(int iClusterId);
+
+	/**
 	 * Internal. Adds a data segment where to store record content.
 	 */
 	public int addDataSegment(String iSegmentName, String iSegmentFileName);
 
 	/**
-	 * Checks if the operation on a resource is allowed fir the current user.
+	 * Sets a property value
 	 * 
-	 * @param iResource
-	 *          Resource where to execute the operation
-	 * @param iOperation
-	 *          Operation to execute against the resource
-	 * @return The Database instance itself giving a "fluent interface". Useful to call multiple methods in chain.
+	 * @param iName
+	 *          Property name
+	 * @param iValue
+	 *          new value to set
+	 * @return The previous value if any, otherwise null
 	 */
-	public <DB extends ODatabase> DB checkSecurity(String iResource, int iOperation);
+	public Object setProperty(String iName, Object iValue);
+
+	/**
+	 * Gets the property value.
+	 * 
+	 * @param iName
+	 *          Property name
+	 * @return The previous value if any, otherwise null
+	 */
+	public Object getProperty(String iName);
+
+	/**
+	 * Returns an iterator of the property entries
+	 */
+	public Iterator<Map.Entry<String, Object>> getProperties();
+
+	/**
+	 * Returns a database attribute value
+	 * 
+	 * @param iAttribute
+	 *          Attributes between #ATTRIBUTES enum
+	 * @return The attribute value
+	 */
+	public Object get(ATTRIBUTES iAttribute);
+
+	/**
+	 * Sets a database attribute value
+	 * 
+	 * @param iAttribute
+	 *          Attributes between #ATTRIBUTES enum
+	 * @param iValue
+	 *          Value to set
+	 * @return
+	 */
+	public <DB extends ODatabase> DB set(ATTRIBUTES iAttribute, Object iValue);
+
+	/**
+	 * Registers a listener to the database events.
+	 * 
+	 * @param iListener
+	 */
+	public void registerListener(ODatabaseListener iListener);
+
+	/**
+	 * Unregisters a listener to the database events.
+	 * 
+	 * @param iListener
+	 */
+	public void unregisterListener(ODatabaseListener iListener);
+
+	public <V> V callInLock(Callable<V> iCallable, boolean iExclusiveLock);
 }

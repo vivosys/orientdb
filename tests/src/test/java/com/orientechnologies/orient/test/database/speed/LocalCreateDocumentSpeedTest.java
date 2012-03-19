@@ -53,6 +53,7 @@ public class LocalCreateDocumentSpeedTest extends OrientMonoThreadTest {
 		database.begin(TXTYPE.NOTX);
 	}
 
+	@Override
 	public void cycle() {
 		record.reset();
 
@@ -60,7 +61,7 @@ public class LocalCreateDocumentSpeedTest extends OrientMonoThreadTest {
 		record.field("id", data.getCyclesDone());
 		record.field("name", "Luca");
 		record.field("surname", "Garulli");
-		record.field("birthDay", date);
+		record.field("birthDate", date);
 		record.field("salary", 3000f + data.getCyclesDone());
 
 		record.save();
@@ -71,7 +72,10 @@ public class LocalCreateDocumentSpeedTest extends OrientMonoThreadTest {
 
 	@Override
 	public void deinit() {
-		database.close();
+		System.out.println(OProfiler.getInstance().dump());
+
+		if (database != null)
+			database.close();
 		super.deinit();
 	}
 }

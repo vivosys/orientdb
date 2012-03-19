@@ -15,114 +15,193 @@
  */
 package com.orientechnologies.orient.core.metadata.security;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Set;
 
+import com.orientechnologies.orient.core.annotation.OAfterDeserialization;
 import com.orientechnologies.orient.core.exception.OSecurityAccessException;
+import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.security.OSecurityManager;
+import com.orientechnologies.orient.core.type.ODocumentWrapper;
 
 /**
- * Mode = ALLOW (allow all but) or DENY (deny all but)
+ * Contains the user settings about security and permissions. Each user has one or more roles associated. Roles contains the
+ * permission rules that define what the user can access and what he cannot.
+ * 
+ * @author Luca Garulli
+ * 
+ * @see ORole
  */
-public class OUser {
-	public enum MODE {
-		ALLOW_ALL_BUT, DENY_ALL_BUT
+public class OUser extends ODocumentWrapper {
+	public static final String	ADMIN	= "admin";
+
+	public enum STATUSES {
+		SUSPENDED, ACTIVE
 	}
 
-	// CRUD OPERATIONS
-	public final static int				CREATE						= 1;
-	public final static int				READ							= 2;
-	public final static int				UPDATE						= 4;
-	public final static int				DELETE						= 8;
+	// AVOID THE INVOCATION OF SETTER
+	protected Set<ORole>	roles	= new HashSet<ORole>();
 
-	public final static String		ALL								= "*";
-	public final static String		DATABASE					= "database";
-	public final static String		CLUSTER						= "database.cluster";
-	public final static String		CLASS							= "database.class";
-	public final static String		ALL_CLASSES				= "database.class.*";
-	public static final String		QUERY							= "database.query";
-	public static final String		COMMAND						= "database.command";
-	public final static String		SERVER_ADMIN			= "server.admin";
-
-	protected final static int		ACL_OPERATION_NUM	= 8;
-
-	protected final static byte		DENY							= '0';
-	protected final static byte		ALLOW							= '1';
-
-	protected String							name;
-	protected String							password;
-	protected byte								mode							= DENY;
-	protected OUser								inherit;
-	protected Map<String, byte[]>	acl								= new LinkedHashMap<String, byte[]>();
-
-	public OUser(String iName) {
-		name = iName;
+	/**
+	 * Constructor used in unmarshalling.
+	 */
+	public OUser() {
 	}
 
-	public boolean checkPassword(String iPassword) {
-		return OSecurityManager.instance().check(iPassword, password);
+	public OUser(final String iName) {
+		super("OUser");
+		document.field("name", iName);
+		setAccountStatus(STATUSES.ACTIVE);
 	}
 
-	public boolean allow(final String iResource, final int iCRUDOperation) {
-		if (iCRUDOperation >= ACL_OPERATION_NUM)
-			throw new OSecurityAccessException("Requested invalid operation '" + iCRUDOperation + "' against resource: " + iResource);
+	public OUser(String iUserName, final String iUserPassword) {
+		super("OUser");
+		document.field("name", iUserName);
+		setPassword(iUserPassword);
+		setAccountStatus(STATUSES.ACTIVE);
+	}
 
-		// CHECK FOR SECURITY AS DIRECT RESOURCE
-		byte[] access = acl.get(iResource);
-		if (access != null)
-			return access[iCRUDOperation] != mode;
+	/**
+	 * Create the user by reading the source document.
+	 */
+	public OUser(final ODocument iSource) {
+		fromStream(iSource);
+	}
 
-		// CHECK FOR SECURITY IN DERIVED RESOURCES, IF ANY
-		if (iResource.startsWith(CLASS)) {
-			// CHECK FOR SECURITY IN "ALL CLASSES"
-			access = acl.get(ALL_CLASSES);
-			if (access != null)
-				return access[iCRUDOperation] != mode;
+	@Override
+	@OAfterDeserialization
+	public void fromStream(final ODocument iSource) {
+		if (document != null)
+			return;
+
+		document = iSource;
+
+		roles = new HashSet<ORole>();
+		final Collection<ODocument> loadedRoles = iSource.field("roles");
+		if (loadedRoles != null)
+			for (final ODocument d : loadedRoles) {
+				roles.add(document.getDatabase().getMetadata().getSecurity().getRole((String) d.field("name")));
+			}
+	}
+
+	/**
+	 * Checks if the user has the permission to access to the requested resource for the requested operation.
+	 * 
+	 * @param iResource
+	 *          Requested resource
+	 * @param iOperation
+	 *          Requested operation
+	 * @return The role that has granted the permission if any, otherwise a OSecurityAccessException exception is raised
+	 * @exception OSecurityAccessException
+	 */
+	public ORole allow(final String iResource, final int iOperation) {
+		if (roles == null || roles.isEmpty())
+			throw new OSecurityAccessException(document.getDatabase().getName(), "User '" + document.field("name")
+					+ "' has no role defined");
+
+		final ORole role = checkIfAllowed(iResource, iOperation);
+
+		if (role == null)
+			throw new OSecurityAccessException(document.getDatabase().getName(), "User '" + document.field("name")
+					+ "' has no the permission to execute the operation '" + ORole.permissionToString(iOperation)
+					+ "' against the resource: " + iResource);
+
+		return role;
+	}
+
+	/**
+	 * Checks if the user has the permission to access to the requested resource for the requested operation.
+	 * 
+	 * @param iResource
+	 *          Requested resource
+	 * @param iOperation
+	 *          Requested operation
+	 * @return The role that has granted the permission if any, otherwise null
+	 */
+	public ORole checkIfAllowed(final String iResource, final int iOperation) {
+		for (ORole r : roles)
+			if (r.allow(iResource, iOperation))
+				return r;
+
+		return null;
+	}
+
+	/**
+	 * Checks if a rule was defined for the user.
+	 * 
+	 * @param iResource
+	 *          Requested resource
+	 * @return True is a rule is defined, otherwise false
+	 */
+	public boolean isRuleDefined(final String iResource) {
+		for (ORole r : roles)
+			if (r.hasRule(iResource))
+				return true;
+
+		return false;
+	}
+
+	public boolean checkPassword(final String iPassword) {
+		return OSecurityManager.instance().check(iPassword, (String) document.field("password"));
+	}
+
+	public String getName() {
+		return document.field("name");
+	}
+
+	public String getPassword() {
+		return document.field("password");
+	}
+
+	public OUser setPassword(final String iPassword) {
+		document.field("password", iPassword);
+		return this;
+	}
+
+	public static final String encryptPassword(final String iPassword) {
+		return OSecurityManager.instance().digest2String(iPassword, true);
+	}
+
+	public STATUSES getAccountStatus() {
+		return STATUSES.valueOf((String) document.field("status"));
+	}
+
+	public void setAccountStatus(STATUSES accountStatus) {
+		document.field("status", accountStatus);
+	}
+
+	public Set<ORole> getRoles() {
+		return roles;
+	}
+
+	public OUser addRole(final String iRole) {
+		if (iRole != null)
+			addRole(document.getDatabase().getMetadata().getSecurity().getRole(iRole));
+		return this;
+	}
+
+	public OUser addRole(final ORole iRole) {
+		if (iRole != null)
+			roles.add(iRole);
+
+		final HashSet<ODocument> persistentRoles = new HashSet<ODocument>();
+		for (ORole r : roles) {
+			persistentRoles.add(r.toStream());
 		}
-
-		return mode == ALLOW;
-	}
-
-	public String name() {
-		return this.name;
-	}
-
-	public MODE mode() {
-		return mode == ALLOW ? MODE.ALLOW_ALL_BUT : MODE.DENY_ALL_BUT;
-	}
-
-	public OUser mode(MODE mode) {
-		this.mode = mode == MODE.ALLOW_ALL_BUT ? ALLOW : DENY;
+		document.field("roles", persistentRoles);
 		return this;
 	}
 
-	public byte internalMode() {
-		return mode;
-	}
-
-	public void internalMode(byte iMode) {
-		mode = iMode;
-	}
-
-	public OUser inherit() {
-		return inherit;
-	}
-
-	public OUser inherit(OUser inherit) {
-		this.inherit = inherit;
+	@Override
+	@SuppressWarnings("unchecked")
+	public OUser save() {
+		document.save(OUser.class.getSimpleName());
 		return this;
 	}
 
-	public String password() {
-		return password;
-	}
-
-	public OUser password(String iPassword) {
-		this.password = OSecurityManager.instance().digest2String(iPassword);
-		return this;
-	}
-
-	public void passwordEncoded(String iPassword) {
-		this.password = iPassword;
+	@Override
+	public String toString() {
+		return getName();
 	}
 }

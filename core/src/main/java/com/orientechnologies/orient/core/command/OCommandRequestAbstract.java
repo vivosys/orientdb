@@ -15,12 +15,11 @@
  */
 package com.orientechnologies.orient.core.command;
 
-import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 
-import com.orientechnologies.orient.core.db.record.ODatabaseRecord;
-import com.orientechnologies.orient.core.record.impl.ODocument;
-import com.orientechnologies.orient.core.serialization.OBinaryProtocol;
-import com.orientechnologies.orient.core.serialization.OSerializableStream;
+import com.orientechnologies.common.listener.OProgressListener;
+import com.orientechnologies.orient.core.db.record.OIdentifiable;
 
 /**
  * Text based Command Request abstract class.
@@ -28,67 +27,14 @@ import com.orientechnologies.orient.core.serialization.OSerializableStream;
  * @author Luca Garulli
  * 
  */
+@SuppressWarnings("serial")
 public abstract class OCommandRequestAbstract implements OCommandRequestInternal {
-	protected String									text;
-	protected ODatabaseRecord<?>			database;
-	protected int											limit	= -1;
 	protected OCommandResultListener	resultListener;
-	protected Object[]								parameters;
+	protected OProgressListener				progressListener;
+	protected int											limit	= -1;
+	protected Map<Object, Object>			parameters;
 
 	protected OCommandRequestAbstract() {
-	}
-
-	protected OCommandRequestAbstract(final String iText) {
-		this(iText, null);
-	}
-
-	protected OCommandRequestAbstract(final String iText, final ODatabaseRecord<ODocument> iDatabase) {
-		text = iText;
-		database = iDatabase;
-	}
-
-	/**
-	 * Delegates the execution to the configured command executor.
-	 */
-	@SuppressWarnings("unchecked")
-	public <RET> RET execute(final Object... iArgs) {
-		parameters = iArgs;
-		return (RET) database.getStorage().command(this);
-	}
-
-	public String getText() {
-		return text;
-	}
-
-	public OSerializableStream fromStream(byte[] iStream) throws IOException {
-		text = OBinaryProtocol.bytes2string(iStream);
-		return this;
-	}
-
-	public byte[] toStream() throws IOException {
-		return OBinaryProtocol.string2bytes(text);
-	}
-
-	@Override
-	public String toString() {
-		return getClass().getSimpleName() + " [text=" + text + "]";
-	}
-
-	public ODatabaseRecord<?> getDatabase() {
-		return database;
-	}
-
-	public OCommandRequestInternal setDatabase(final ODatabaseRecord<?> iDatabase) {
-		this.database = iDatabase;
-		return this;
-	}
-
-	public int getLimit() {
-		return limit;
-	}
-
-	public void setLimit(int limit) {
-		this.limit = limit;
 	}
 
 	public OCommandResultListener getResultListener() {
@@ -99,7 +45,55 @@ public abstract class OCommandRequestAbstract implements OCommandRequestInternal
 		resultListener = iListener;
 	}
 
-	public Object[] getParameters() {
+	public Map<Object, Object> getParameters() {
 		return parameters;
 	}
+
+	protected void setParameters(final Object... iArgs) {
+		if (iArgs.length > 0)
+			parameters = convertToParameters(iArgs);
+	}
+
+	@SuppressWarnings("unchecked")
+	protected Map<Object, Object> convertToParameters(final Object... iArgs) {
+		final Map<Object, Object> params;
+
+		if (iArgs.length == 1 && iArgs[0] instanceof Map) {
+			params = (Map<Object, Object>) iArgs[0];
+		} else {
+			params = new HashMap<Object, Object>(iArgs.length);
+			for (int i = 0; i < iArgs.length; ++i) {
+				Object par = iArgs[i];
+
+				if (par instanceof OIdentifiable && ((OIdentifiable) par).getIdentity().isValid())
+					// USE THE RID ONLY
+					par = ((OIdentifiable) par).getIdentity();
+
+				params.put(i, par);
+			}
+		}
+		return params;
+	}
+
+	public OProgressListener getProgressListener() {
+		return progressListener;
+	}
+
+	public OCommandRequestAbstract setProgressListener(OProgressListener progressListener) {
+		this.progressListener = progressListener;
+		return this;
+	}
+
+	public void reset() {
+	}
+
+	public int getLimit() {
+		return limit;
+	}
+
+	public OCommandRequestAbstract setLimit(final int limit) {
+		this.limit = limit;
+		return this;
+	}
+
 }

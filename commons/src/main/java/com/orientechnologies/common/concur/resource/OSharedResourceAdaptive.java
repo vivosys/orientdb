@@ -1,84 +1,159 @@
+/*
+ * Copyright 1999-2011 Luca Garulli (l.garulli--at--orientechnologies.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.orientechnologies.common.concur.resource;
 
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
+import com.orientechnologies.common.concur.OTimeoutException;
+import com.orientechnologies.common.concur.lock.OLockException;
+
+/**
+ * Adaptive class to handle shared resources. It's configurable specifying if it's running in a concurrent environment and allow o
+ * specify a maximum timeout to avoid deadlocks.
+ * 
+ * @author Luca Garulli (l.garulli--at--orientechnologies.com)
+ * 
+ */
 public class OSharedResourceAdaptive {
-	private static final int	UNLOCKED_WAIT_TIME	= 30;
-	private ReadWriteLock			lock								= new ReentrantReadWriteLock();
-	private volatile int			users								= 0;
-	private volatile boolean	runningWithoutLock	= false;
+	private final ReadWriteLock	lock	= new ReentrantReadWriteLock();
+	private final AtomicInteger	users	= new AtomicInteger(0);
+	private final boolean				concurrent;
+	private final int						timeout;
+	private final boolean				ignoreThreadInterruption;
 
-	protected boolean acquireExclusiveLock() {
-		if (users > 1) {
-			lock.writeLock().lock();
+	protected OSharedResourceAdaptive() {
+		this.concurrent = true;
+		this.timeout = 0;
+		this.ignoreThreadInterruption = false;
+	}
 
-			if (runningWithoutLock)
-				// WAIT UNTIL THE UNIQUE THREAD IS RUNNING WITHOUT LOCK FINISHES
-				while (runningWithoutLock)
-					try {
-						Thread.sleep(UNLOCKED_WAIT_TIME);
-					} catch (InterruptedException e) {
+	protected OSharedResourceAdaptive(final int iTimeout) {
+		this.concurrent = true;
+		this.timeout = iTimeout;
+		this.ignoreThreadInterruption = false;
+	}
+
+	protected OSharedResourceAdaptive(final boolean iConcurrent) {
+		this.concurrent = iConcurrent;
+		this.timeout = 0;
+		this.ignoreThreadInterruption = false;
+	}
+
+	protected OSharedResourceAdaptive(final boolean iConcurrent, final int iTimeout, boolean ignoreThreadInterruption) {
+		this.concurrent = iConcurrent;
+		this.timeout = iTimeout;
+		this.ignoreThreadInterruption = ignoreThreadInterruption;
+	}
+
+	protected void acquireExclusiveLock() {
+		if (concurrent)
+			if (timeout > 0) {
+				try {
+					if (lock.writeLock().tryLock(timeout, TimeUnit.MILLISECONDS))
+						// OK
+						return;
+				} catch (InterruptedException e) {
+					if (ignoreThreadInterruption) {
+						// IGNORE THE THREAD IS INTERRUPTED: TRY TO RE-LOCK AGAIN
+						try {
+							if (lock.writeLock().tryLock(timeout, TimeUnit.MILLISECONDS)) {
+								// OK, RESET THE INTERRUPTED STATE
+								Thread.currentThread().interrupt();
+								return;
+							}
+						} catch (InterruptedException e2) {
+							Thread.currentThread().interrupt();
+						}
 					}
 
-			return true;
-		}
-
-		runningWithoutLock = true;
-		return false;
+					throw new OLockException("Thread interrupted while waiting for resource of class '" + getClass() + "' with timeout="
+							+ timeout);
+				}
+				throw new OTimeoutException("Timeout on acquiring exclusive lock against resource of class: " + getClass()
+						+ " with timeout=" + timeout);
+			} else
+				lock.writeLock().lock();
 	}
 
-	protected boolean acquireSharedLock() {
-		if (users > 1) {
-			lock.readLock().lock();
-			return true;
-		}
-
-		runningWithoutLock = true;
-		return false;
+	protected boolean tryAcquireExclusiveLock() {
+		return concurrent || lock.writeLock().tryLock();
 	}
 
-	protected void releaseExclusiveLock(final boolean iLocked) {
-		if (iLocked)
+	protected void acquireSharedLock() {
+		if (concurrent)
+			if (timeout > 0) {
+				try {
+					if (lock.readLock().tryLock(timeout, TimeUnit.MILLISECONDS))
+						// OK
+						return;
+				} catch (InterruptedException e) {
+					if (ignoreThreadInterruption) {
+						// IGNORE THE THREAD IS INTERRUPTED: TRY TO RE-LOCK AGAIN
+						try {
+							if (lock.readLock().tryLock(timeout, TimeUnit.MILLISECONDS)) {
+								// OK, RESET THE INTERRUPTED STATE
+								Thread.currentThread().interrupt();
+								return;
+							}
+						} catch (InterruptedException e2) {
+							Thread.currentThread().interrupt();
+						}
+					}
+					throw new OLockException("Thread interrupted while waiting for resource of class '" + getClass() + "' with timeout="
+							+ timeout);
+				}
+				throw new OTimeoutException("Timeout on acquiring shared lock against resource of class : " + getClass() + " with timeout="
+						+ timeout);
+			} else
+				lock.readLock().lock();
+	}
+
+	protected boolean tryAcquireSharedLock() {
+		return concurrent || lock.readLock().tryLock();
+	}
+
+	protected void releaseExclusiveLock() {
+		if (concurrent)
 			lock.writeLock().unlock();
-		else
-			runningWithoutLock = false;
 	}
 
-	protected void releaseSharedLock(final boolean iLocked) {
-		if (iLocked)
+	protected void releaseSharedLock() {
+		if (concurrent)
 			lock.readLock().unlock();
-		else
-			runningWithoutLock = false;
 	}
 
 	public int getUsers() {
-		return users;
+		return users.get();
 	}
 
 	public int addUser() {
-		// ASSURE TO ACQUIRE THE LOCK FIRST
-		lock.writeLock().lock();
-
-		try {
-			return ++users;
-
-		} finally {
-			lock.writeLock().unlock();
-		}
+		return users.incrementAndGet();
 	}
 
 	public int removeUser() {
-		if (users < 1)
-			throw new IllegalStateException("Can't remove user of the shared resource " + toString() + " because no user is using it");
+		if (users.get() < 1)
+			throw new IllegalStateException("Cannot remove user of the shared resource " + toString() + " because no user is using it");
 
-		try {
-			lock.writeLock().lock();
+		return users.decrementAndGet();
+	}
 
-			return --users;
-
-		} finally {
-			lock.writeLock().unlock();
-		}
+	public boolean isConcurrent() {
+		return concurrent;
 	}
 }

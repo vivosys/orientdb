@@ -15,14 +15,13 @@
  */
 package com.orientechnologies.orient.core.serialization.serializer.stream;
 
-import com.orientechnologies.orient.core.db.record.ODatabaseRecord;
 import com.orientechnologies.orient.core.exception.OConfigurationException;
 
 public class OStreamSerializerFactory {
-	public static OStreamSerializer get(ODatabaseRecord<?> iDatabase, String iName) {
+	public static OStreamSerializer get(final String iName) {
 		try {
 			if (iName.equals(OStreamSerializerRecord.NAME))
-				return new OStreamSerializerRecord(iDatabase);
+				return OStreamSerializerRecord.INSTANCE;
 
 			else if (iName.equals(OStreamSerializerString.NAME))
 				return OStreamSerializerString.INSTANCE;
@@ -30,19 +29,28 @@ public class OStreamSerializerFactory {
 			else if (iName.equals(OStreamSerializerLong.NAME))
 				return OStreamSerializerLong.INSTANCE;
 
+			else if (iName.equals(OStreamSerializerLiteral.NAME))
+				return OStreamSerializerLiteral.INSTANCE;
+
 			else if (iName.equals(OStreamSerializerAnyRecord.NAME))
-				return new OStreamSerializerAnyRecord(iDatabase);
+				return OStreamSerializerAnyRecord.INSTANCE;
 
 			else if (iName.equals(OStreamSerializerAnyStreamable.NAME))
 				return OStreamSerializerAnyStreamable.INSTANCE;
 
-			else if (iName.equals(OStreamSerializerAnyStatic.NAME))
-				return new OStreamSerializerAnyStatic(null);
+			else if (iName.equals(OStreamSerializerRID.NAME))
+				return OStreamSerializerRID.INSTANCE;
+
+			else if (iName.equals(OStreamSerializerListRID.NAME))
+				return OStreamSerializerListRID.INSTANCE;
+
+			else if (iName.equals(OCompositeKeySerializer.NAME))
+				return OCompositeKeySerializer.INSTANCE;
 
 			throw new OConfigurationException("Stream Serializer '" + iName + "' not registered");
 
 		} catch (Exception e) {
-			throw new OConfigurationException("Error on the retrieving of Stream Serializer '" + iName + "'", e);
+			throw new OConfigurationException("Error on retrieving of Stream Serializer '" + iName + "'", e);
 		}
 	}
 }

@@ -19,8 +19,10 @@ done
 # Get standard environment variables
 PRGDIR=`dirname "$PRG"`
 
-# Only set CATALINA_HOME if not already set
-[ -z "$ORIENT_HOME" ] && ORIENT_HOME=`cd "$PRGDIR/.." ; pwd`
-export ORIENT_HOME
+# Only set ORIENTDB_HOME if not already set
+[ -f "$ORIENTDB_HOME"/lib/orientdb-tools-@VERSION@.jar ] || ORIENTDB_HOME=`cd "$PRGDIR/.." ; pwd`
+export ORIENTDB_HOME
 
-java -client -jar $ORIENT_HOME/lib/orient-database-tools.jar
+# Only set ORIENTDB_HOME if not already set correctly
+
+java -client -Dfile.encoding=utf-8 -Dorientdb.build.number=@BUILD@ -jar $ORIENTDB_HOME/lib/orientdb-tools-@VERSION@.jar $*

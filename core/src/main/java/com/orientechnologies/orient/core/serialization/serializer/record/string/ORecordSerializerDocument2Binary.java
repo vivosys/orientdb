@@ -17,15 +17,12 @@ package com.orientechnologies.orient.core.serialization.serializer.record.string
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
-import java.io.ObjectInput;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutput;
-import java.io.ObjectOutputStream;
 import java.util.Date;
 
 import com.orientechnologies.common.log.OLogManager;
-import com.orientechnologies.orient.core.db.document.ODatabaseDocument;
 import com.orientechnologies.orient.core.db.record.ODatabaseRecord;
 import com.orientechnologies.orient.core.exception.ODatabaseException;
 import com.orientechnologies.orient.core.id.ORID;
@@ -40,29 +37,27 @@ import com.orientechnologies.orient.core.serialization.serializer.record.ORecord
 public class ORecordSerializerDocument2Binary implements ORecordSerializer {
 	public static final String	NAME	= "ORecordDocument2binary";
 
-	protected ORecordSchemaAware<?> newObject(ODatabaseRecord<?> iDatabase, String iClassName) throws InstantiationException,
+	protected ORecordSchemaAware<?> newObject(ODatabaseRecord iDatabase, String iClassName) throws InstantiationException,
 			IllegalAccessException {
-		return new ODocument((ODatabaseDocument) iDatabase);
+		return new ODocument();
 	}
 
-	public ORecordInternal<?> fromStream(ODatabaseRecord<?> iDatabase, byte[] iSource) {
+	public ORecordInternal<?> fromStream(ODatabaseRecord iDatabase, byte[] iSource) {
 		// TODO: HANDLE FACTORIES
-		return fromStream(iDatabase, iSource, null);
+		return fromStream(iSource, null);
 	}
 
-	public ORecordInternal<?> fromStream(ODatabaseRecord<?> iDatabase, byte[] iSource, ORecordInternal<?> iRecord) {
+	public ORecordInternal<?> fromStream(byte[] iSource, ORecordInternal<?> iRecord) {
 		ODocument record = (ODocument) iRecord;
-		ODatabaseDocument database = (ODatabaseDocument) iDatabase;
-
 		if (iRecord == null)
-			record = new ODocument(database);
+			record = new ODocument();
 
 		ByteArrayInputStream stream = null;
-		ObjectInput in = null;
+		DataInputStream in = null;
 
 		try {
 			stream = new ByteArrayInputStream(iSource);
-			in = new ObjectInputStream(stream);
+			in = new DataInputStream(stream);
 
 			// UNMARSHALL ALL THE PROPERTIES
 			Object value;
@@ -70,7 +65,6 @@ public class ORecordSerializerDocument2Binary implements ORecordSerializer {
 			byte[] buffer;
 			for (OProperty p : record.getSchemaClass().properties()) {
 				value = null;
-				record.field(p.getName(), in.readObject());
 
 				switch (p.getType()) {
 				case BINARY:
@@ -78,7 +72,7 @@ public class ORecordSerializerDocument2Binary implements ORecordSerializer {
 					if (length >= 0) {
 						// != NULL
 						buffer = new byte[length];
-						in.read(buffer);
+						in.readFully(buffer);
 						value = buffer;
 					}
 					break;
@@ -86,6 +80,7 @@ public class ORecordSerializerDocument2Binary implements ORecordSerializer {
 					value = in.readBoolean();
 					break;
 				case DATE:
+				case DATETIME:
 					long date = in.readLong();
 					if (date > -1)
 						value = new Date(date);
@@ -98,8 +93,8 @@ public class ORecordSerializerDocument2Binary implements ORecordSerializer {
 					if (length >= 0) {
 						// != NULL
 						buffer = new byte[length];
-						in.read(buffer);
-						value = new ODocument(database, p.getLinkedClass().getName()).fromStream(buffer);
+						in.readFully(buffer);
+						value = new ODocument(p.getLinkedClass().getName()).fromStream(buffer);
 					}
 					break;
 				case EMBEDDEDLIST:
@@ -148,15 +143,15 @@ public class ORecordSerializerDocument2Binary implements ORecordSerializer {
 		return iRecord;
 	}
 
-	public byte[] toStream(ODatabaseRecord<?> iDatabase, ORecordInternal<?> iRecord) {
+	public byte[] toStream(final ORecordInternal<?> iRecord, boolean iOnlyDelta) {
 		ODocument record = (ODocument) iRecord;
 
 		ByteArrayOutputStream stream = null;
-		ObjectOutput out = null;
+		DataOutputStream out = null;
 
 		try {
 			stream = new ByteArrayOutputStream();
-			out = new ObjectOutputStream(stream);
+			out = new DataOutputStream(stream);
 
 			// MARSHALL ALL THE PROPERTIES
 			Object value;
@@ -181,6 +176,7 @@ public class ORecordSerializerDocument2Binary implements ORecordSerializer {
 						out.writeBoolean((Boolean) value);
 					break;
 				case DATE:
+				case DATETIME:
 					out.writeLong(value != null ? ((Date) value).getTime() : -1);
 					break;
 				case DOUBLE:

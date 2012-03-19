@@ -22,29 +22,23 @@ import com.orientechnologies.orient.core.Orient;
 import com.orientechnologies.orient.core.storage.OStorage;
 import com.orientechnologies.orient.server.OClientConnection;
 import com.orientechnologies.orient.server.OClientConnectionManager;
-import com.orientechnologies.orient.server.network.protocol.ONetworkProtocol;
 
 public class OrientServer implements OrientServerMBean {
 	protected List<OStorage>	storages;
 	protected String					info;
 
+	@Override
 	public OStorage[] getOpenedStorages() {
 		OStorage[] output = new OStorage[Orient.instance().getStorages().size()];
 		output = Orient.instance().getStorages().toArray(output);
 		return output;
 	}
 
+	@Override
 	public OClientConnection[] getConnections() {
-		Collection<OClientConnection> conns = OClientConnectionManager.instance().getConnections().values();
-		OClientConnection[] output = new OClientConnection[conns.size()];
+		final Collection<OClientConnection> conns = OClientConnectionManager.instance().getConnections();
+		final OClientConnection[] output = new OClientConnection[conns.size()];
 		conns.toArray(output);
-		return output;
-	}
-
-	public ONetworkProtocol[] getHandlers() {
-		Collection<ONetworkProtocol> handlers = OClientConnectionManager.instance().getHandlers().values();
-		ONetworkProtocol[] output = new ONetworkProtocol[handlers.size()];
-		handlers.toArray(output);
 		return output;
 	}
 }

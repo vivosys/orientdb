@@ -15,45 +15,89 @@
  */
 package com.orientechnologies.orient.enterprise.channel.binary;
 
+import java.io.IOException;
+
+import com.orientechnologies.orient.core.Orient;
+import com.orientechnologies.orient.core.db.record.OIdentifiable;
+import com.orientechnologies.orient.core.record.ORecordInternal;
+import com.orientechnologies.orient.core.record.ORecordSchemaAware;
+
+/**
+ * The range of the requests is 1-79.
+ * 
+ * @author Luca Garulli (l.garulli--at--orientechnologies.com)
+ * 
+ */
 public class OChannelBinaryProtocol {
-	public static final int		CURRENT_VERSION				= 0;
+	// OUTGOING
+	public static final byte	REQUEST_SHUTDOWN							= 1;
+	public static final byte	REQUEST_CONNECT								= 2;
 
-	// COMMANDS
-	public static final short	CONNECT								= 1;
+	public static final byte	REQUEST_DB_OPEN								= 3;
+	public static final byte	REQUEST_DB_CREATE							= 4;
+	public static final byte	REQUEST_DB_CLOSE							= 5;
+	public static final byte	REQUEST_DB_EXIST							= 6;
+	public static final byte	REQUEST_DB_DROP								= 7;
+	public static final byte	REQUEST_DB_SIZE								= 8;
+	public static final byte	REQUEST_DB_COUNTRECORDS				= 9;
 
-	public static final byte	DB_OPEN								= 5;
-	public static final byte	DB_CREATE							= 6;
-	public static final byte	DB_CLOSE							= 7;
-	public static final byte	DB_EXIST							= 8;
+	public static final byte	REQUEST_DATACLUSTER_ADD				= 10;
+	public static final byte	REQUEST_DATACLUSTER_REMOVE		= 11;
+	public static final byte	REQUEST_DATACLUSTER_COUNT			= 12;
+	public static final byte	REQUEST_DATACLUSTER_DATARANGE	= 13;
+	public static final byte	REQUEST_DATACLUSTER_COPY			= 14;
 
-	public static final byte	CLUSTER_PHYSICAL_ADD	= 10;
-	public static final byte	CLUSTER_LOGICAL_ADD		= 11;
-	public static final byte	CLUSTER_REMOVE				= 12;
-	public static final byte	CLUSTER_COUNT					= 13;
+	public static final byte	REQUEST_DATASEGMENT_ADD				= 20;
+	public static final byte	REQUEST_DATASEGMENT_REMOVE		= 21;
 
-	public static final byte	DATASEGMENT_ADD				= 20;
-	public static final byte	DATASEGMENT_REMOVE		= 21;
+	public static final byte	REQUEST_RECORD_LOAD						= 30;
+	public static final byte	REQUEST_RECORD_CREATE					= 31;
+	public static final byte	REQUEST_RECORD_UPDATE					= 32;
+	public static final byte	REQUEST_RECORD_DELETE					= 33;
+	public static final byte	REQUEST_RECORD_COPY						= 34;
 
-	public static final byte	RECORD_LOAD						= 30;
-	public static final byte	RECORD_CREATE					= 31;
-	public static final byte	RECORD_UPDATE					= 32;
-	public static final byte	RECORD_DELETE					= 33;
+	public static final byte	REQUEST_COUNT									= 40; // DEPRECATED: USE REQUEST_DATACLUSTER_COUNT
+	public static final byte	REQUEST_COMMAND								= 41;
 
-	public static final byte	COUNT									= 40;
-	public static final byte	COMMAND								= 41;
+	public static final byte	REQUEST_TX_COMMIT							= 60;
 
-	public static final byte	DICTIONARY_LOOKUP			= 50;
-	public static final byte	DICTIONARY_PUT				= 51;
-	public static final byte	DICTIONARY_REMOVE			= 52;
-	public static final byte	DICTIONARY_SIZE				= 53;
-	public static final byte	DICTIONARY_KEYS				= 54;
+	public static final byte	REQUEST_CONFIG_GET						= 70;
+	public static final byte	REQUEST_CONFIG_SET						= 71;
+	public static final byte	REQUEST_CONFIG_LIST						= 72;
+	public static final byte	REQUEST_DB_RELOAD							= 73; // SINCE 1.0rc4
+	public static final byte	REQUEST_DB_LIST								= 74; // SINCE 1.0rc6
+	public static final byte	REQUEST_DB_COPY								= 75; // SINCE 1.0rc8
 
-	public static final byte	TX_COMMIT							= 100;
+	public static final byte	REQUEST_PUSH_RECORD						= 79;
+	public static final byte	PUSH_NODE2CLIENT_DB_CONFIG		= 80;
 
-	// STATUSES
-	public static final byte	OK										= 0;
-	public static final byte	ERROR									= 1;
+	// INCOMING
+	public static final byte	RESPONSE_STATUS_OK						= 0;
+	public static final byte	RESPONSE_STATUS_ERROR					= 1;
+	public static final byte	PUSH_DATA											= 3;
 
 	// CONSTANTS
-	public static final int		RECORD_NULL						= -2;
+	public static final short	RECORD_NULL										= -2;
+	public static final short	RECORD_RID										= -3;
+	public static final int		CURRENT_PROTOCOL_VERSION			= 9;	// SENT AS SHORT AS FIRST PACKET AFTER SOCKET CONNECTION
+
+	public static OIdentifiable readIdentifiable(final OChannelBinaryClient network) throws IOException {
+		final int classId = network.readShort();
+		if (classId == RECORD_NULL)
+			return null;
+
+		if (classId == RECORD_RID) {
+			return network.readRID();
+		} else {
+			final ORecordInternal<?> record = Orient.instance().getRecordFactoryManager().newInstance(network.readByte());
+
+			if (record instanceof ORecordSchemaAware<?>)
+				((ORecordSchemaAware<?>) record).fill(network.readRID(), network.readInt(), network.readBytes(), false);
+			else
+				// DISCARD CLASS ID
+				record.fill(network.readRID(), network.readInt(), network.readBytes(), false);
+
+			return record;
+		}
+	}
 }

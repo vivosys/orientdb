@@ -15,8 +15,11 @@
  */
 package com.orientechnologies.orient.server;
 
+import com.orientechnologies.orient.core.Orient;
+
 public class OServerShutdownHook extends Thread {
 	protected OServerShutdownHook() {
+		Orient.instance().removeShutdownHook();
 		Runtime.getRuntime().addShutdownHook(this);
 	}
 
@@ -25,6 +28,14 @@ public class OServerShutdownHook extends Thread {
 	 */
 	@Override
 	public void run() {
-		OServerMain.server().shutdown();
+		if (OServerMain.server() != null)
+			OServerMain.server().shutdown();
+	}
+
+	public void cancel() {
+		try {
+			Runtime.getRuntime().removeShutdownHook(this);
+		} catch (IllegalStateException e) {
+		}
 	}
 }

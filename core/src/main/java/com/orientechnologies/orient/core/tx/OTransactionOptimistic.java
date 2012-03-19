@@ -15,14 +15,31 @@
  */
 package com.orientechnologies.orient.core.tx;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map.Entry;
+import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import com.orientechnologies.orient.core.config.OGlobalConfiguration;
+import com.orientechnologies.orient.core.db.ODatabaseComplex.OPERATION_MODE;
 import com.orientechnologies.orient.core.db.record.ODatabaseRecordTx;
+import com.orientechnologies.orient.core.db.record.ORecordOperation;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.id.ORecordId;
+import com.orientechnologies.orient.core.index.OIndex;
+import com.orientechnologies.orient.core.index.OIndexMVRBTreeAbstract;
 import com.orientechnologies.orient.core.record.ORecordInternal;
+import com.orientechnologies.orient.core.record.impl.ODocument;
+import com.orientechnologies.orient.core.storage.OStorageEmbedded;
 
-public class OTransactionOptimistic<REC extends ORecordInternal<?>> extends OTransactionRealAbstract<REC> {
-	public OTransactionOptimistic(final ODatabaseRecordTx<REC> iDatabase, final int iId) {
-		super(iDatabase, iId);
+public class OTransactionOptimistic extends OTransactionRealAbstract {
+	private boolean								usingLog;
+	private static AtomicInteger	txSerial	= new AtomicInteger();
+
+	public OTransactionOptimistic(final ODatabaseRecordTx iDatabase) {
+		super(iDatabase, txSerial.incrementAndGet());
+		usingLog = OGlobalConfiguration.TX_USE_LOG.getValueAsBoolean();
 	}
 
 	public void begin() {
@@ -30,108 +47,199 @@ public class OTransactionOptimistic<REC extends ORecordInternal<?>> extends OTra
 	}
 
 	public void commit() {
+		checkTransaction();
 		status = TXSTATUS.COMMITTING;
-		database.executeCommit();
-		status = TXSTATUS.INVALID;
+
+		if (!(database.getStorage() instanceof OStorageEmbedded))
+			database.getStorage().commit(this);
+		else {
+			database.getStorage().callInLock(new Callable<Void>() {
+
+				public Void call() throws Exception {
+					final List<String> involvedIndexes = getInvolvedIndexes();
+
+					// LOCK INVOLVED INDEXES
+					List<OIndexMVRBTreeAbstract<?>> lockedIndexes = null;
+					try {
+						if (involvedIndexes != null)
+							for (String indexName : involvedIndexes) {
+								final OIndexMVRBTreeAbstract<?> index = (OIndexMVRBTreeAbstract<?>) database.getMetadata().getIndexManager()
+										.getIndexInternal(indexName);
+								if (lockedIndexes == null)
+									lockedIndexes = new ArrayList<OIndexMVRBTreeAbstract<?>>();
+
+								index.acquireExclusiveLock();
+								lockedIndexes.add(index);
+							}
+
+						database.getStorage().commit(OTransactionOptimistic.this);
+
+						// COMMIT INDEX CHANGES
+						final ODocument indexEntries = getIndexChanges();
+						if (indexEntries != null) {
+							for (Entry<String, Object> indexEntry : indexEntries) {
+								final OIndex<?> index = database.getMetadata().getIndexManager().getIndexInternal(indexEntry.getKey());
+								index.commit((ODocument) indexEntry.getValue());
+							}
+						}
+						return null;
+
+					} finally {
+						// RELEASE INDEX LOCKS IF ANY
+						if (lockedIndexes != null)
+							// DON'T USE GENERICS TO AVOID OpenJDK CRASH :-(
+							for (OIndexMVRBTreeAbstract<?> index : lockedIndexes) {
+								index.releaseExclusiveLock();
+							}
+					}
+				}
+
+			}, true);
+
+		}
 	}
 
 	public void rollback() {
-		status = TXSTATUS.ROLLBACKING;
-		entries.clear();
-		status = TXSTATUS.INVALID;
-	}
-
-	public REC load(final int iClusterId, final long iPosition, final REC iRecord) {
 		checkTransaction();
 
-		OTransactionEntry<REC> txEntry = getRecord(iClusterId, iPosition);
+		status = TXSTATUS.ROLLBACKING;
 
-		if (txEntry != null) {
-			switch (txEntry.status) {
-			case OTransactionEntry.LOADED:
-			case OTransactionEntry.UPDATED:
-			case OTransactionEntry.CREATED:
-				return txEntry.record;
+		// CLEAR THE CACHE MOVING GOOD RECORDS TO LEVEL-2 CACHE
+		database.getLevel1Cache().clear();
 
-			case OTransactionEntry.DELETED:
-				return null;
-			}
-		}
+		// REMOVE ALL THE ENTRIES AND INVALIDATE THE DOCUMENTS TO AVOID TO BE RE-USED DIRTY AT USER-LEVEL. IN THIS WAY RE-LOADING MUST
+		// EXECUTED
+		for (ORecordOperation v : recordEntries.values())
+			v.getRecord().unload();
+
+		for (ORecordOperation v : allEntries.values())
+			v.getRecord().unload();
+
+		indexEntries.clear();
+	}
+
+	public ORecordInternal<?> loadRecord(final ORID iRid, final ORecordInternal<?> iRecord, final String iFetchPlan) {
+		checkTransaction();
+
+		final ORecordInternal<?> txRecord = getRecord(iRid);
+		if (txRecord == OTransactionRealAbstract.DELETED_RECORD)
+			// DELETED IN TX
+			return null;
+
+		if (txRecord != null)
+			return txRecord;
 
 		// DELEGATE TO THE STORAGE
-		return (REC) database.executeReadRecord(iClusterId, iPosition, iRecord);
+		return database.executeReadRecord((ORecordId) iRid, iRecord, iFetchPlan, false);
 	}
 
-	public void delete(final REC iRecord) {
-		addRecord(iRecord, OTransactionEntry.DELETED, null);
+	public void deleteRecord(final ORecordInternal<?> iRecord, final OPERATION_MODE iMode) {
+		if (!iRecord.getIdentity().isValid())
+			return;
+
+		addRecord(iRecord, ORecordOperation.DELETED, null);
 	}
 
-	public void save(final REC iContent, final String iClusterName) {
-		addRecord(iContent, iContent.getIdentity().isValid() ? OTransactionEntry.UPDATED : OTransactionEntry.CREATED, iClusterName);
+	public void saveRecord(final ORecordInternal<?> iRecord, final String iClusterName, final OPERATION_MODE iMode) {
+		addRecord(iRecord, iRecord.getIdentity().isValid() ? ORecordOperation.UPDATED : ORecordOperation.CREATED, iClusterName);
 	}
 
-	private void addRecord(final REC iRecord, final byte iStatus, final String iClusterName) {
+	private void addRecord(final ORecordInternal<?> iRecord, final byte iStatus, final String iClusterName) {
 		checkTransaction();
 
-		int clusterId = iRecord.getIdentity().getClusterId();
-		long position = iRecord.getIdentity().getClusterPosition();
-
-		String key = clusterId + ORID.SEPARATOR;
-		if (position == -1) {
-			// NEW RECORD: CHECK IF IT'S ALREADY IN
-			for (OTransactionEntry<REC> entry : entries.values()) {
-				if (entry.record == iRecord)
-					return;
+		if ((status == OTransaction.TXSTATUS.COMMITTING) && database.getStorage() instanceof OStorageEmbedded) {
+			// && iRecord.getIdentity().isValid() && allEntries.containsKey(iRecord.getIdentity())) {
+			// if ((OStorage.CLUSTER_INDEX_NAME.equals(iClusterName) || iRecord.getIdentity().getClusterId() == database.getStorage()
+			// .getClusterIdByName(OStorage.CLUSTER_INDEX_NAME)) && database.getStorage() instanceof OStorageEmbedded) {
+			
+			// I'M COMMITTING: BYPASS LOCAL BUFFER
+			switch (iStatus) {
+			case ORecordOperation.CREATED:
+			case ORecordOperation.UPDATED:
+				database
+						.executeSaveRecord(iRecord, iClusterName, iRecord.getVersion(), iRecord.getRecordType(), OPERATION_MODE.SYNCHRONOUS);
+				break;
+			case ORecordOperation.DELETED:
+				database.executeDeleteRecord(iRecord, iRecord.getVersion(), false, OPERATION_MODE.SYNCHRONOUS);
+				break;
 			}
-
-			// ASSIGN A UNIQUE SERIAL TEMPORARY ID
-			position = newObjectCounter++;
-			key += position + "+";
-		} else
-			key += position;
-
-		OTransactionEntry<REC> txEntry = entries.get(key);
-
-		if (txEntry == null) {
-			// NEW ENTRY: JUST REGISTER IT
-			txEntry = new OTransactionEntry<REC>(iRecord, iStatus, iClusterName);
-			entries.put(key, txEntry);
 		} else {
-			// UPDATE PREVIOUS STATUS
-			txEntry.record = iRecord;
+			final ORecordId rid = (ORecordId) iRecord.getIdentity();
 
-			switch (txEntry.status) {
-			case OTransactionEntry.LOADED:
-				switch (iStatus) {
-				case OTransactionEntry.UPDATED:
-					txEntry.status = OTransactionEntry.UPDATED;
+			if (!rid.isValid()) {
+				// // TODO: NEED IT FOR REAL?
+				// // NEW RECORD: CHECK IF IT'S ALREADY IN
+				// for (OTransactionRecordEntry entry : recordEntries.values()) {
+				// if (entry.getRecord() == iRecord)
+				// return;
+				// }
+
+				iRecord.onBeforeIdentityChanged(rid);
+
+				// ASSIGN A UNIQUE SERIAL TEMPORARY ID
+				if (rid.clusterId == ORID.CLUSTER_ID_INVALID)
+					rid.clusterId = iClusterName != null ? database.getClusterIdByName(iClusterName) : database.getDefaultClusterId();
+				rid.clusterPosition = newObjectCounter--;
+
+				iRecord.onAfterIdentityChanged(iRecord);
+			} else
+				// REMOVE FROM THE DB'S CACHE
+				database.getLevel1Cache().freeRecord(rid);
+
+			ORecordOperation txEntry = getRecordEntry(rid);
+
+			if (txEntry == null) {
+				// NEW ENTRY: JUST REGISTER IT
+				txEntry = new ORecordOperation(iRecord, iStatus);
+
+				recordEntries.put(rid, txEntry);
+			} else {
+				// UPDATE PREVIOUS STATUS
+				txEntry.record = iRecord;
+
+				switch (txEntry.type) {
+				case ORecordOperation.LOADED:
+					switch (iStatus) {
+					case ORecordOperation.UPDATED:
+						txEntry.type = ORecordOperation.UPDATED;
+						break;
+					case ORecordOperation.DELETED:
+						txEntry.type = ORecordOperation.DELETED;
+						break;
+					}
 					break;
-				case OTransactionEntry.DELETED:
-					txEntry.status = OTransactionEntry.DELETED;
+				case ORecordOperation.UPDATED:
+					switch (iStatus) {
+					case ORecordOperation.DELETED:
+						txEntry.type = ORecordOperation.DELETED;
+						break;
+					}
+					break;
+				case ORecordOperation.DELETED:
+					break;
+				case ORecordOperation.CREATED:
+					switch (iStatus) {
+					case ORecordOperation.DELETED:
+						recordEntries.remove(rid);
+						break;
+					}
 					break;
 				}
-				break;
-			case OTransactionEntry.UPDATED:
-				switch (iStatus) {
-				case OTransactionEntry.DELETED:
-					txEntry.status = OTransactionEntry.DELETED;
-					break;
-				}
-				break;
-			case OTransactionEntry.DELETED:
-				break;
-			case OTransactionEntry.CREATED:
-				switch (iStatus) {
-				case OTransactionEntry.DELETED:
-					entries.remove(key);
-					break;
-				}
-				break;
 			}
 		}
 	}
 
-	private OTransactionEntry<REC> getRecord(final int iClusterId, final long iPosition) {
-		return entries.get(ORecordId.generateString(iClusterId, iPosition));
+	@Override
+	public String toString() {
+		return "OTransactionOptimistic [id=" + id + ", status=" + status + ", recEntries=" + recordEntries.size() + ", idxEntries="
+				+ indexEntries.size() + "]";
+	}
+
+	public boolean isUsingLog() {
+		return usingLog;
+	}
+
+	public void setUsingLog(final boolean useLog) {
+		this.usingLog = useLog;
 	}
 }

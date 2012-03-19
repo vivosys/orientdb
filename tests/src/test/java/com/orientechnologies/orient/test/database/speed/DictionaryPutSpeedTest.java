@@ -18,9 +18,8 @@ package com.orientechnologies.orient.test.database.speed;
 import org.testng.annotations.Test;
 
 import com.orientechnologies.common.profiler.OProfiler;
-import com.orientechnologies.orient.client.remote.OEngineRemote;
-import com.orientechnologies.orient.core.Orient;
 import com.orientechnologies.orient.core.db.record.ODatabaseFlat;
+import com.orientechnologies.orient.core.intent.OIntentMassiveInsert;
 import com.orientechnologies.orient.core.record.impl.ORecordFlat;
 import com.orientechnologies.orient.core.tx.OTransaction.TXTYPE;
 import com.orientechnologies.orient.test.database.base.OrientMonoThreadTest;
@@ -28,20 +27,22 @@ import com.orientechnologies.orient.test.database.base.OrientMonoThreadTest;
 @Test(enabled = false)
 public class DictionaryPutSpeedTest extends OrientMonoThreadTest {
 	private ODatabaseFlat	database;
-	private ORecordFlat					record;
-	private long								startNum;
+	private ORecordFlat		record;
+	private long					startNum;
 
 	public static void main(String[] iArgs) throws InstantiationException, IllegalAccessException {
+//		System.setProperty("url", "remote:localhost:2424/demo");
 		DictionaryPutSpeedTest test = new DictionaryPutSpeedTest();
 		test.data.go(test);
 	}
 
 	public DictionaryPutSpeedTest() throws InstantiationException, IllegalAccessException {
 		super(1000000);
-		Orient.instance().registerEngine(new OEngineRemote());
-		// String url = "remote:localhost:2424/petshop";
+
 		String url = System.getProperty("url");
 		database = new ODatabaseFlat(url).open("admin", "admin");
+		database.declareIntent(new OIntentMassiveInsert());
+
 		record = database.newInstance();
 		startNum = 0;// database.countClusterElements("Animal");
 
@@ -52,6 +53,7 @@ public class DictionaryPutSpeedTest extends OrientMonoThreadTest {
 		database.begin(TXTYPE.NOTX);
 	}
 
+	@Override
 	public void cycle() {
 		int id = (int) (startNum + data.getCyclesDone());
 
@@ -64,6 +66,7 @@ public class DictionaryPutSpeedTest extends OrientMonoThreadTest {
 		database.getDictionary().put("doc-" + id, record);
 	}
 
+	@Override
 	public void deinit() {
 		System.out.println("Total element in the dictionary: " + database.getDictionary().size());
 

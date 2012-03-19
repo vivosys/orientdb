@@ -20,7 +20,7 @@ import javax.xml.bind.annotation.XmlRootElement;
 import javax.xml.bind.annotation.XmlType;
 
 @XmlRootElement(name = "protocol")
-@XmlType(propOrder = { "name", "implementation" })
+@XmlType(propOrder = { "implementation", "name" })
 public class OServerNetworkProtocolConfiguration {
 
 	@XmlAttribute(required = true)

@@ -15,13 +15,18 @@
  */
 package com.orientechnologies.orient.core.id;
 
+import java.io.IOException;
+import java.io.OutputStream;
+
+import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.serialization.OSerializableStream;
 
-public interface ORID extends OSerializableStream {
-	public static final String	SEPARATOR						= ":";
-	public static final int			CLUSTER_MAX					= 32767;
-	public static final int			CLUSTER_ID_INVALID	= -1;
-	public static final int			CLUSTER_POS_INVALID	= -1;
+public interface ORID extends OIdentifiable, OSerializableStream {
+	public static final char	PREFIX							= '#';
+	public static final char	SEPARATOR						= ':';
+	public static final int		CLUSTER_MAX					= 32767;
+	public static final int		CLUSTER_ID_INVALID	= -1;
+	public static final int		CLUSTER_POS_INVALID	= -1;
 
 	public int getClusterId();
 
@@ -29,7 +34,19 @@ public interface ORID extends OSerializableStream {
 
 	public void reset();
 
+	public boolean isPersistent();
+
 	public boolean isValid();
 
+	public boolean isNew();
+
+	public boolean isTemporary();
+
 	public ORID copy();
+
+	public String next();
+
+	public int toStream(OutputStream iStream) throws IOException;
+
+	public StringBuilder toString(StringBuilder iBuffer);
 }

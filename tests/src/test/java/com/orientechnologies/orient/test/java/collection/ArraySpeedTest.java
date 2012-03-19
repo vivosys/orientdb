@@ -18,6 +18,7 @@ package com.orientechnologies.orient.test.java.collection;
 public class ArraySpeedTest extends CollectionBaseAbstractSpeedTest {
 	private String[]	array;
 
+	@Override
 	public void cycle() {
 		for (String item : array) {
 			if (item.equals(searchedValue))
@@ -25,6 +26,7 @@ public class ArraySpeedTest extends CollectionBaseAbstractSpeedTest {
 		}
 	}
 
+	@Override
 	public void init() {
 		array = new String[collectionSize];
 		for (int i = 0; i < collectionSize; ++i) {

@@ -15,15 +15,47 @@
  */
 package com.orientechnologies.orient.core.db.record;
 
+import com.orientechnologies.orient.core.iterator.ORecordIteratorCluster;
 import com.orientechnologies.orient.core.record.impl.ORecordFlat;
 
 /**
  * Delegates all the CRUD operations to the current transaction.
  * 
  */
-public class ODatabaseFlat extends ODatabaseRecordTx<ORecordFlat> {
+public class ODatabaseFlat extends ODatabaseRecordTx {
 
 	public ODatabaseFlat(String iURL) {
-		super(iURL, ORecordFlat.class);
+		super(iURL, ORecordFlat.RECORD_TYPE);
 	}
+
+	@SuppressWarnings("unchecked")
+	@Override
+	public ORecordIteratorCluster<ORecordFlat> browseCluster(final String iClusterName) {
+		return super.browseCluster(iClusterName, ORecordFlat.class);
+	}
+
+	@SuppressWarnings("unchecked")
+	@Override
+	public ORecordFlat newInstance() {
+		return new ORecordFlat();
+	}
+
+	@Override
+	public ODatabaseRecord commit() {
+		try {
+			return super.commit();
+		} finally {
+			getTransaction().close();
+		}
+	}
+
+	@Override
+	public ODatabaseRecord rollback() {
+		try {
+			return super.rollback();
+		} finally {
+			getTransaction().close();
+		}
+	}
+
 }

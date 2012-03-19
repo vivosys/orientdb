@@ -25,9 +25,9 @@ import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 import com.orientechnologies.orient.core.exception.OValidationException;
 import com.orientechnologies.orient.core.record.impl.ODocument;
 
-@Test(groups = { "crud", "record-document" }, sequential = true)
+@Test(groups = { "crud", "record-document" })
 public class CRUDDocumentValidationTest {
-	protected static final int	TOT_RECORDS	= 1000;
+	protected static final int	TOT_RECORDS	= 100;
 	protected long							startRecordNumber;
 	private ODatabaseDocumentTx	database;
 	private ODocument						record;
@@ -43,18 +43,19 @@ public class CRUDDocumentValidationTest {
 		database.open("admin", "admin");
 		record = database.newInstance("Whiz");
 
-		account = database.browseClass("Profile").begin().next();
+		account = new ODocument("Account");
+		account.field("id", "1234567890");
 	}
 
 	@Test(dependsOnMethods = "openDb", expectedExceptions = OValidationException.class)
 	public void validationMandatory() {
-		record.reset();
+		record.clear();
 		record.save();
 	}
 
 	@Test(dependsOnMethods = "validationMandatory", expectedExceptions = OValidationException.class)
 	public void validationMinString() {
-		record.reset();
+		record.clear();
 		record.field("account", account);
 		record.field("id", 23723);
 		record.field("text", "");
@@ -63,7 +64,7 @@ public class CRUDDocumentValidationTest {
 
 	@Test(dependsOnMethods = "validationMinString", expectedExceptions = OValidationException.class, expectedExceptionsMessageRegExp = ".*more.*than.*")
 	public void validationMaxString() {
-		record.reset();
+		record.clear();
 		record.field("account", account);
 		record.field("id", 23723);
 		record
@@ -73,16 +74,31 @@ public class CRUDDocumentValidationTest {
 		record.save();
 	}
 
-	@Test(dependsOnMethods = "validationMaxString", expectedExceptions = OValidationException.class, expectedExceptionsMessageRegExp = ".*before.*")
+	@Test(dependsOnMethods = "validationMaxString", expectedExceptions = OValidationException.class, expectedExceptionsMessageRegExp = ".*precedes.*")
 	public void validationMinDate() throws ParseException {
-		record.reset();
+		record.clear();
 		record.field("account", account);
-		record.field("date", new SimpleDateFormat("dd/MM/yyyy").parse("01/01/1976"));
+		record.field("date", new SimpleDateFormat("dd/MM/yyyy").parse("01/33/1976"));
 		record.field("text", "test");
 		record.save();
 	}
 
-	@Test(dependsOnMethods = "validationMinDate")
+	@Test(dependsOnMethods = "validationMinDate", expectedExceptions = OValidationException.class)
+	public void validationEmbeddedType() throws ParseException {
+		record.clear();
+		record.field("account", database.getUser());
+		record.save();
+	}
+
+	@Test(dependsOnMethods = "validationEmbeddedType", expectedExceptions = OValidationException.class)
+	public void validationStrictClass() throws ParseException {
+		ODocument doc = new ODocument("StrictTest");
+		doc.field("id", 122112);
+		doc.field("antani", "122112");
+		doc.save();
+	}
+
+	@Test(dependsOnMethods = "validationStrictClass")
 	public void closeDb() {
 		database.close();
 	}

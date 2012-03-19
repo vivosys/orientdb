@@ -1,5 +1,5 @@
 /*
- * Copyright 1999-2010 Luca Garulli (l.garulli--at--orientechnologies.com)
+ * Copyright 1999-2011 Luca Garulli (l.garulli--at--orientechnologies.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,131 +15,31 @@
  */
 package com.orientechnologies.orient.core.query.nativ;
 
-import com.orientechnologies.orient.core.record.ORecord;
-import com.orientechnologies.orient.core.record.ORecordSchemaAware;
+import com.orientechnologies.orient.core.record.impl.ODocument;
 
-@SuppressWarnings("unchecked")
-public class OQueryContextNativeSchema<T extends ORecordSchemaAware<?>> extends OQueryContextNative<T> {
-	public OQueryContextNativeSchema column(String iName) {
-		field(iName);
-		return this;
-	}
-
-	public OQueryContextNativeSchema field(String iName) {
-		if (result != null && result.booleanValue())
-			return this;
-
-		T currentRecord = currentValue != null && currentValue instanceof ORecord<?> ? (T) currentValue : record;
-
-		currentValue = currentRecord.field(iName);
-		return this;
-	}
-
-	@Override
-	public OQueryContextNativeSchema and() {
-		super.and();
-		return this;
-	}
-
-	@Override
-	public OQueryContextNativeSchema between(Object iFrom, Object iTo) {
-		super.between(iFrom, iTo);
-		return this;
-	}
-
-	@Override
-	public OQueryContextNativeSchema different(Object iValue) {
-		super.different(iValue);
-		return this;
-	}
-
-	@Override
-	public OQueryContextNativeSchema eq(Object iValue) {
-		super.eq(iValue);
-		return this;
-	}
-
-	@Override
-	public OQueryContextNativeSchema like(String iValue) {
-		super.like(iValue);
-		return this;
-	}
-
-	@Override
-	public OQueryContextNativeSchema major(Object iValue) {
-		super.major(iValue);
-		return this;
-	}
-
-	@Override
-	public OQueryContextNativeSchema majorEq(Object iValue) {
-		super.majorEq(iValue);
-		return this;
-	}
-
-	@Override
-	public OQueryContextNativeSchema matches(Object iValue) {
-		super.matches(iValue);
-		return this;
-	}
-
-	@Override
-	public OQueryContextNativeSchema minor(Object iValue) {
-		super.minor(iValue);
-		return this;
-	}
-
-	@Override
-	public OQueryContextNativeSchema minorEq(Object iValue) {
-		super.minorEq(iValue);
-		return this;
-	}
-
-	@Override
-	public OQueryContextNativeSchema not() {
-		super.not();
-		return this;
-	}
-
-	@Override
-	public OQueryContextNativeSchema or() {
-		super.or();
-		return this;
-	}
-
-	@Override
-	public OQueryContextNativeSchema toChar() {
-		super.toChar();
-		return this;
-	}
-
-	@Override
-	public OQueryContextNativeSchema toDate() {
-		super.toDate();
-		return this;
-	}
-
-	@Override
-	public OQueryContextNativeSchema toDouble() {
-		super.toDouble();
-		return this;
-	}
-
-	@Override
-	public OQueryContextNativeSchema toFloat() {
-		super.toFloat();
-		return this;
-	}
-
-	@Override
-	public OQueryContextNativeSchema toInt() {
-		super.toInt();
-		return this;
-	}
-
-	@Override
-	public OQueryContextNativeSchema toLong() {
-		super.toLong();
-		return this;
-	}
+/**
+ * Deprecated. Use OQueryContextNative class instead. Now this code:<br/>
+ * <code>
+ * List<ODocument> result = new ONativeSynchQuery<ODocument, OQueryContextNativeSchema<ODocument>>(database, "Profile",
+ * 				new OQueryContextNativeSchema<ODocument>()) {
+ * 
+ * @Override public boolean filter(OQueryContextNativeSchema<ODocument> iRecord) { return
+ *           iRecord.field("location").field("city").field("name").eq("Rome").and().field("name").like("G%").go(); };
+ * 
+ *           }.execute(); </code> can be simplified with:<br/>
+ *           <code>
+ * List<ODocument> result = new ONativeSynchQuery<OQueryContextNative>(database, "Profile",
+ * 				new OQueryContextNative()) {
+ * 
+ * @Override public boolean filter(OQueryContextNative iRecord) { return
+ *           iRecord.field("location").field("city").field("name").eq("Rome").and().field("name").like("G%").go(); };
+ * 
+ *           }.execute();
+ * 
+ * @author Luca Garulli (l.garulli--at--orientechnologies.com)
+ * 
+ * @param <T>
+ */
+@Deprecated
+public class OQueryContextNativeSchema<T extends ODocument> extends OQueryContextNative {
 }

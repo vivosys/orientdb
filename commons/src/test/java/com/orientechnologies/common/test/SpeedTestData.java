@@ -3,7 +3,7 @@ package com.orientechnologies.common.test;
 public class SpeedTestData {
 	protected static final int	TIME_WAIT						= 200;
 	protected long							cycles							= 1;
-	protected volatile long			cyclesDone					= 0;
+	protected long							cyclesDone					= 0;
 	protected final static int	DUMP_PERCENT				= 10;
 
 	protected String						currentTestName;
@@ -116,6 +116,10 @@ public class SpeedTestData {
 			testGroup.setResult("Execution time", currentTestName, elapsed);
 			testGroup.setResult("Free memory", currentTestName, freeMemory);
 		}
+
+		currentTestFreeMemory = freeMemory;
+		currentTestTotalMemory = totalMemory;
+		currentTestMaxMemory = maxMemory;
 	}
 
 	/*
@@ -131,12 +135,12 @@ public class SpeedTestData {
 		buffer.append(++partialTimerCounter);
 		buffer.append(" elapsed: ");
 		buffer.append(e);
-		buffer.append(" ns");
+		buffer.append(" ms");
 
 		if (partialTimer > 0) {
 			buffer.append(" (from last partial: ");
 			buffer.append(e - partialTimer);
-			buffer.append(" ns)");
+			buffer.append(" ms)");
 		}
 
 		System.out.println(buffer);

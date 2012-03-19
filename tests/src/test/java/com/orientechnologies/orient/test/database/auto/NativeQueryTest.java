@@ -24,11 +24,11 @@ import org.testng.annotations.Test;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocument;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 import com.orientechnologies.orient.core.query.nativ.ONativeSynchQuery;
-import com.orientechnologies.orient.core.query.nativ.OQueryContextNativeSchema;
+import com.orientechnologies.orient.core.query.nativ.OQueryContextNative;
 import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.test.database.base.OrientTest;
 
-@Test(groups = "query", sequential = true)
+@Test(groups = "query")
 public class NativeQueryTest {
 	private ODatabaseDocument	database;
 	private ODocument					record;
@@ -39,29 +39,35 @@ public class NativeQueryTest {
 	}
 
 	@Test
-	public void querySchemaAndLike() {
+	public void queryNativeLike() {
 		database.open("admin", "admin");
 
-		List<ODocument> result =
-
-		new ONativeSynchQuery<ODocument, OQueryContextNativeSchema<ODocument>>(database, "Account", new OQueryContextNativeSchema<ODocument>()) {
+		@SuppressWarnings("serial")
+		ONativeSynchQuery<OQueryContextNative> q = (ONativeSynchQuery<OQueryContextNative>) new ONativeSynchQuery<OQueryContextNative>(
+				database, "Profile", new OQueryContextNative()) {
 
 			@Override
-			public boolean filter(OQueryContextNativeSchema<ODocument> iRecord) {
+			public boolean filter(OQueryContextNative iRecord) {
 				return iRecord.field("location").field("city").field("name").eq("Rome").and().field("name").like("G%").go();
 			};
 
-		}.execute();
+		}.setLimit(20);
+
+		List<ODocument> result = (List<ODocument>) q.execute();
+		int firstResultSize = result.size();
 
 		for (int i = 0; i < result.size(); ++i) {
 			record = result.get(i);
 
 			OrientTest.printRecord(i, record);
 
-			Assert.assertTrue(record.getClassName().equalsIgnoreCase("Person"));
-			Assert.assertEquals(((ODocument) record.field("city")).field("name"), "Rome");
+			Assert.assertTrue(record.getClassName().equalsIgnoreCase("Profile"));
+			Assert.assertEquals(((ODocument) ((ODocument) record.field("location")).field("city")).field("name"), "Rome");
 			Assert.assertTrue(record.field("name").toString().startsWith("G"));
 		}
+
+		result = (List<ODocument>) q.execute();
+		Assert.assertEquals(result.size(), firstResultSize);
 
 		database.close();
 	}

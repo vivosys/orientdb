@@ -15,6 +15,11 @@
  */
 package com.orientechnologies.orient.core.sql.operator;
 
+import com.orientechnologies.orient.core.command.OCommandContext;
+import com.orientechnologies.orient.core.db.record.OIdentifiable;
+import com.orientechnologies.orient.core.id.ORID;
+import com.orientechnologies.orient.core.record.impl.ODocument;
+import com.orientechnologies.orient.core.sql.OSQLHelper;
 import com.orientechnologies.orient.core.sql.filter.OSQLFilterCondition;
 
 /**
@@ -29,7 +34,41 @@ public class OQueryOperatorIs extends OQueryOperatorEquality {
 		super("IS", 5, false);
 	}
 
-	protected boolean evaluateExpression(OSQLFilterCondition iCondition, final Object iLeft, final Object iRight) {
-		return iLeft == iRight;
+	@Override
+	protected boolean evaluateExpression(final OIdentifiable iRecord, final OSQLFilterCondition iCondition, final Object iLeft,
+			final Object iRight, OCommandContext iContext) {
+		if (OSQLHelper.NOT_NULL.equals(iRight))
+			return iLeft != null;
+		else if (OSQLHelper.NOT_NULL.equals(iLeft))
+			return iRight != null;
+		else if (OSQLHelper.DEFINED.equals(iLeft))
+			return evaluateDefined(iRecord, (String) iRight);
+		else if (OSQLHelper.DEFINED.equals(iRight))
+			return evaluateDefined(iRecord, (String) iLeft);
+		else
+			return iLeft == iRight;
 	}
+
+	protected boolean evaluateDefined(final OIdentifiable iRecord, final String iFieldName) {
+		if (iRecord instanceof ODocument) {
+			return ((ODocument) iRecord).containsField(iFieldName);
+		}
+		return false;
+	}
+
+	@Override
+	public OIndexReuseType getIndexReuseType(final Object iLeft, final Object iRight) {
+		return OIndexReuseType.NO_INDEX;
+	}
+
+	@Override
+	public ORID getBeginRidRange(Object iLeft, Object iRight) {
+		return null;
+	}
+
+	@Override
+	public ORID getEndRidRange(Object iLeft, Object iRight) {
+		return null;
+	}
+
 }

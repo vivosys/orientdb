@@ -15,11 +15,20 @@
  */
 package com.orientechnologies.orient.core.sql;
 
-import com.orientechnologies.orient.core.command.OCommandRequestInternal;
+import java.util.Map;
+
+import com.orientechnologies.orient.core.command.OCommandRequestText;
 import com.orientechnologies.orient.core.command.OCommandResultListener;
+import com.orientechnologies.orient.core.db.record.ODatabaseRecord;
+import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.exception.OCommandExecutionException;
+import com.orientechnologies.orient.core.index.OIndex;
+import com.orientechnologies.orient.core.metadata.security.ODatabaseSecurityResources;
+import com.orientechnologies.orient.core.metadata.security.ORole;
 import com.orientechnologies.orient.core.record.ORecordAbstract;
 import com.orientechnologies.orient.core.record.impl.ODocument;
+import com.orientechnologies.orient.core.sql.filter.OSQLFilter;
+import com.orientechnologies.orient.core.sql.filter.OSQLFilterCondition;
 import com.orientechnologies.orient.core.sql.query.OSQLAsynchQuery;
 import com.orientechnologies.orient.core.sql.query.OSQLQuery;
 
@@ -30,14 +39,24 @@ import com.orientechnologies.orient.core.sql.query.OSQLQuery;
  * 
  */
 public class OCommandExecutorSQLDelete extends OCommandExecutorSQLAbstract implements OCommandResultListener {
+	public static final String		KEYWORD_DELETE	= "DELETE";
+	private static final String		VALUE_NOT_FOUND	= "_not_found_";
+
 	private OSQLQuery<ODocument>	query;
-	private int										recordCount	= 0;
+	private String								indexName				= null;
+	private int										recordCount			= 0;
+
+	private OSQLFilter						compiledFilter;
 
 	public OCommandExecutorSQLDelete() {
 	}
 
-	public OCommandExecutorSQLDelete parse(final OCommandRequestInternal iRequest) {
-		init(iRequest.getDatabase(), iRequest.getText());
+	@SuppressWarnings("unchecked")
+	public OCommandExecutorSQLDelete parse(final OCommandRequestText iRequest) {
+		final ODatabaseRecord database = getDatabase();
+		database.checkSecurity(ODatabaseSecurityResources.COMMAND, ORole.PERMISSION_DELETE);
+
+		init(iRequest.getText());
 
 		query = null;
 		recordCount = 0;
@@ -45,29 +64,99 @@ public class OCommandExecutorSQLDelete extends OCommandExecutorSQLAbstract imple
 		StringBuilder word = new StringBuilder();
 
 		int pos = OSQLHelper.nextWord(text, textUpperCase, 0, word, true);
-		if (pos == -1 || !word.toString().equals(OSQLHelper.KEYWORD_DELETE))
-			throw new OCommandSQLParsingException("Keyword " + OSQLHelper.KEYWORD_DELETE + " not found", text, 0);
+		if (pos == -1 || !word.toString().equals(OCommandExecutorSQLDelete.KEYWORD_DELETE))
+			throw new OCommandSQLParsingException("Keyword " + OCommandExecutorSQLDelete.KEYWORD_DELETE + " not found. Use "
+					+ getSyntax(), text, 0);
 
-		query = database.command(new OSQLAsynchQuery<ODocument>("select " + text.substring(pos), this));
+		int oldPos = pos;
+		pos = OSQLHelper.nextWord(text, textUpperCase, oldPos, word, true);
+		if (pos == -1 || !word.toString().equals(KEYWORD_FROM))
+			throw new OCommandSQLParsingException("Keyword " + KEYWORD_FROM + " not found. Use " + getSyntax(), text, oldPos);
+
+		oldPos = pos;
+		pos = OSQLHelper.nextWord(text, textUpperCase, oldPos, word, true);
+		if (pos == -1)
+			throw new OCommandSQLParsingException("Invalid subject name. Expected cluster, class or index. Use " + getSyntax(), text,
+					oldPos);
+
+		final String subjectName = word.toString();
+
+		if (subjectName.startsWith(OCommandExecutorSQLAbstract.INDEX_PREFIX)) {
+			// INDEX
+			indexName = subjectName.substring(OCommandExecutorSQLAbstract.INDEX_PREFIX.length());
+			compiledFilter = OSQLEngine.getInstance().parseFromWhereCondition(text.substring(oldPos), context);
+		} else {
+			query = database.command(new OSQLAsynchQuery<ODocument>("select from " + subjectName + " " + text.substring(pos), this));
+		}
 
 		return this;
 	}
 
-	public Object execute(final Object... iArgs) {
-		if (query == null)
-			throw new OCommandExecutionException("Can't execute the command because it hasn't been parsed yet");
+	public Object execute(final Map<Object, Object> iArgs) {
+		if (query == null && indexName == null)
+			throw new OCommandExecutionException("Cannot execute the command because it has not been parsed yet");
 
-		query.execute();
-		return recordCount;
+		if (query != null) {
+			// AGAINST CLUSTERS AND CLASSES
+			query.execute(iArgs);
+			return recordCount;
+		} else {
+			// AGAINST INDEXES
+			final OIndex<?> index = getDatabase().getMetadata().getIndexManager().getIndex(indexName);
+			if (index == null)
+				throw new OCommandExecutionException("Target index '" + indexName + "' not found");
+
+			Object key = null;
+			Object value = VALUE_NOT_FOUND;
+
+			if (compiledFilter.getRootCondition() == null) {
+				final long total = index.getSize();
+				index.clear();
+				return total;
+			} else {
+				if (KEYWORD_KEY.equalsIgnoreCase(compiledFilter.getRootCondition().getLeft().toString()))
+					// FOUND KEY ONLY
+					key = compiledFilter.getRootCondition().getRight();
+				else if (compiledFilter.getRootCondition().getLeft() instanceof OSQLFilterCondition) {
+					// KEY AND VALUE
+					final OSQLFilterCondition leftCondition = (OSQLFilterCondition) compiledFilter.getRootCondition().getLeft();
+					if (KEYWORD_KEY.equalsIgnoreCase(leftCondition.getLeft().toString()))
+						key = leftCondition.getRight();
+
+					final OSQLFilterCondition rightCondition = (OSQLFilterCondition) compiledFilter.getRootCondition().getRight();
+					if (KEYWORD_RID.equalsIgnoreCase(rightCondition.getLeft().toString()))
+						value = rightCondition.getRight();
+
+				}
+
+				if (key == null)
+					throw new OCommandExecutionException("'Key' field is required for queries against indexes");
+
+				final boolean result;
+				if (value != VALUE_NOT_FOUND)
+					result = index.remove(key, (OIdentifiable) value);
+				else
+					result = index.remove(key);
+				return result ? 1 : 0;
+			}
+		}
 	}
 
 	/**
 	 * Delete the current record.
 	 */
-	@SuppressWarnings("unchecked")
 	public boolean result(final Object iRecord) {
-		((ORecordAbstract<Object>) iRecord).delete();
-		recordCount++;
-		return true;
+		final ORecordAbstract<?> record = (ORecordAbstract<?>) iRecord;
+
+		if (record.getIdentity().isValid()) {
+			record.delete();
+			recordCount++;
+			return true;
+		}
+		return false;
+	}
+
+	public String getSyntax() {
+		return "DELETE FROM <Class>|cluster:<cluster [WHERE <condition>*]";
 	}
 }

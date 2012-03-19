@@ -15,7 +15,7 @@
  */
 package com.orientechnologies.orient.core.sql;
 
-import com.orientechnologies.orient.core.command.OCommandRequestAbstract;
+import com.orientechnologies.orient.core.command.OCommandRequestTextAbstract;
 
 /**
  * SQL command request implementation. It just stores the request and delegated the execution to the configured OCommandExecutor.
@@ -23,7 +23,8 @@ import com.orientechnologies.orient.core.command.OCommandRequestAbstract;
  * @author Luca Garulli
  * 
  */
-public class OCommandSQL extends OCommandRequestAbstract {
+@SuppressWarnings("serial")
+public class OCommandSQL extends OCommandRequestTextAbstract {
 	public OCommandSQL() {
 	}
 

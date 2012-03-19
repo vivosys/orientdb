@@ -15,18 +15,37 @@
  */
 package com.orientechnologies.orient.core.query.nativ;
 
-import com.orientechnologies.orient.core.db.record.ODatabaseRecord;
+import com.orientechnologies.orient.core.exception.OSerializationException;
 import com.orientechnologies.orient.core.query.OQueryAbstract;
-import com.orientechnologies.orient.core.record.ORecordInternal;
+import com.orientechnologies.orient.core.record.impl.ODocument;
+import com.orientechnologies.orient.core.serialization.OSerializableStream;
 
-public abstract class ONativeQuery<T extends ORecordInternal<?>, CTX extends OQueryContextNative<T>> extends OQueryAbstract<T> {
-	protected String	cluster;
+@SuppressWarnings("serial")
+public abstract class ONativeQuery<CTX extends OQueryContextNative> extends OQueryAbstract<ODocument> {
+	protected String	className;
+	protected boolean	polymorphic	= true;
 	protected CTX			queryRecord;
 
 	public abstract boolean filter(CTX iRecord);
 
-	protected ONativeQuery(final ODatabaseRecord<T> iDatabase, final String iCluster) {
-		super(iDatabase);
-		cluster = iCluster;
+	protected ONativeQuery(final String iCluster) {
+		className = iCluster;
 	}
+
+	public byte[] toStream() throws OSerializationException {
+		throw new OSerializationException("Native queries cannot be serialized");
+	}
+
+	public OSerializableStream fromStream(byte[] iStream) throws OSerializationException {
+		throw new OSerializationException("Native queries cannot be deserialized");
+	}
+
+	public boolean isPolymorphic() {
+		return polymorphic;
+	}
+
+	public void setPolymorphic(boolean polymorphic) {
+		this.polymorphic = polymorphic;
+	}
+
 }

@@ -1,20 +1,28 @@
 @echo off
 rem
-rem Copyright (c) 1999-2010 Luca Garulli
+rem Copyright (c) 1999-2011 Luca Garulli @www.orientechnologies.com
 rem
-rem Guess ORIENT_HOME if not defined
+rem Guess ORIENTDB_HOME if not defined
 set CURRENT_DIR=%cd%
 
-if not "%ORIENT_HOME%" == "" goto gotHome
-set ORIENT_HOME=%CURRENT_DIR%
-if exist "%ORIENT_HOME%\bin\console.bat" goto okHome
+if exist "%JAVA_HOME%\bin\java.exe" goto setJavaHome
+set JAVA="java"
+goto okJava
+
+:setJavaHome
+set JAVA="%JAVA_HOME%\bin\java"
+
+:okJava
+if not "%ORIENTDB_HOME%" == "" goto gotHome
+set ORIENTDB_HOME=%CURRENT_DIR%
+if exist "%ORIENTDB_HOME%\bin\console.bat" goto okHome
 cd ..
-set ORIENT_HOME=%cd%
+set ORIENTDB_HOME=%cd%
 cd %CURRENT_DIR%
 
 :gotHome
-if exist "%ORIENT_HOME%\bin\orient-server.bat" goto okHome
-echo The ORIENT_HOME environment variable is not defined correctly
+if exist "%ORIENTDB_HOME%\bin\console.bat" goto okHome
+echo The ORIENTDB_HOME environment variable is not defined correctly
 echo This environment variable is needed to run this program
 goto end
 
@@ -30,6 +38,6 @@ goto setArgs
 
 :doneSetArgs
 
-call "%JAVA_HOME%\bin\java" -client -jar "%ORIENT_HOME%\lib\orient-database-tools.jar" %CMD_LINE_ARGS%
+call %JAVA% -client -Dfile.encoding=utf-8 -Dorientdb.build.number=@BUILD@ -jar "%ORIENTDB_HOME%\lib\orientdb-tools-@VERSION@.jar" %CMD_LINE_ARGS%
 
 :end

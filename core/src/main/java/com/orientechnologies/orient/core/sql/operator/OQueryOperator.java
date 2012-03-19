@@ -15,6 +15,11 @@
  */
 package com.orientechnologies.orient.core.sql.operator;
 
+import java.util.List;
+
+import com.orientechnologies.orient.core.command.OCommandContext;
+import com.orientechnologies.orient.core.db.record.OIdentifiable;
+import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.sql.filter.OSQLFilterCondition;
 
 /**
@@ -24,17 +29,29 @@ import com.orientechnologies.orient.core.sql.filter.OSQLFilterCondition;
  * 
  */
 public abstract class OQueryOperator {
-	public String		keyword;
-	public int			precedence;
-	public boolean	logical;
+	public final String		keyword;
+	public final int			precedence;
+	public final int			expectedRightWords;
+	public final boolean	unary;
 
-	protected OQueryOperator(String iKeyword, int iPrecedence, boolean iLogical) {
+	protected OQueryOperator(final String iKeyword, final int iPrecedence, final boolean iUnary) {
 		keyword = iKeyword;
 		precedence = iPrecedence;
-		logical = iLogical;
+		unary = iUnary;
+		expectedRightWords = 1;
 	}
 
-	public abstract boolean evaluate(final OSQLFilterCondition iCondition, final Object iLeft, final Object iRight);
+	protected OQueryOperator(final String iKeyword, final int iPrecedence, final boolean iUnary, final int iExpectedRightWords) {
+		keyword = iKeyword;
+		precedence = iPrecedence;
+		unary = iUnary;
+		expectedRightWords = iExpectedRightWords;
+	}
+
+	public abstract Object evaluateRecord(final OIdentifiable iRecord, final OSQLFilterCondition iCondition, final Object iLeft,
+			final Object iRight, OCommandContext iContext);
+
+	public abstract OIndexReuseType getIndexReuseType(Object iLeft, Object iRight);
 
 	@Override
 	public String toString() {
@@ -42,12 +59,24 @@ public abstract class OQueryOperator {
 	}
 
 	/**
-	 * Default State-less implementation: return itself
+	 * Default State-less implementation: does not save parameters and just return itself
 	 * 
-	 * @param params
+	 * @param iParams
 	 * @return
 	 */
-	public OQueryOperator configure(String[] params) {
+	public OQueryOperator configure(final List<String> iParams) {
 		return this;
+	}
+
+	public String getSyntax() {
+		return "<left> " + keyword + " <right>";
+	}
+
+	public abstract ORID getBeginRidRange(final Object iLeft, final Object iRight);
+
+	public abstract ORID getEndRidRange(final Object iLeft, final Object iRight);
+
+	public boolean isUnary() {
+		return unary;
 	}
 }

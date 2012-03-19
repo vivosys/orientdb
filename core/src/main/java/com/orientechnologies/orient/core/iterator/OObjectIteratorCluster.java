@@ -24,14 +24,14 @@ import com.orientechnologies.orient.core.record.impl.ODocument;
 
 @SuppressWarnings("unchecked")
 public class OObjectIteratorCluster<T> implements Iterator<T>, Iterable<T> {
-	private ODatabaseObject													database;
+	private ODatabaseObject										database;
 	private ORecordIteratorCluster<ODocument>	underlying;
+	private String														fetchPlan;
 
 	public OObjectIteratorCluster(final ODatabaseObject iDatabase, final ODatabaseRecordAbstract iUnderlyingDatabase,
 			final int iClusterId) {
 		database = iDatabase;
-		underlying = new ORecordIteratorCluster<ODocument>((ODatabaseRecord<ODocument>) iDatabase.getUnderlying(),
-				iUnderlyingDatabase, iClusterId);
+		underlying = new ORecordIteratorCluster<ODocument>((ODatabaseRecord) iDatabase.getUnderlying(), iUnderlyingDatabase, iClusterId);
 	}
 
 	public boolean hasNext() {
@@ -39,12 +39,11 @@ public class OObjectIteratorCluster<T> implements Iterator<T>, Iterable<T> {
 	}
 
 	public T next() {
-		ODocument record = underlying.next();
+		return next(fetchPlan);
+	}
 
-		if (record == null)
-			return null;
-
-		return (T) database.getUserObjectByRecord(record);
+	public T next(final String iFetchPlan) {
+		return (T) database.getUserObjectByRecord(underlying.next(), iFetchPlan);
 	}
 
 	public void remove() {
@@ -52,6 +51,15 @@ public class OObjectIteratorCluster<T> implements Iterator<T>, Iterable<T> {
 	}
 
 	public Iterator<T> iterator() {
+		return this;
+	}
+
+	public String getFetchPlan() {
+		return fetchPlan;
+	}
+
+	public OObjectIteratorCluster<T> setFetchPlan(String fetchPlan) {
+		this.fetchPlan = fetchPlan;
 		return this;
 	}
 }

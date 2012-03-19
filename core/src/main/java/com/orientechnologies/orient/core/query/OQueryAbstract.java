@@ -15,25 +15,37 @@
  */
 package com.orientechnologies.orient.core.query;
 
-import com.orientechnologies.orient.core.db.record.ODatabaseRecord;
-import com.orientechnologies.orient.core.record.ORecordInternal;
+import com.orientechnologies.orient.core.command.OCommandRequestAbstract;
+import com.orientechnologies.orient.core.fetch.OFetchHelper;
 
-public abstract class OQueryAbstract<REC extends ORecordInternal<?>> implements OQuery<REC> {
-	protected ODatabaseRecord<?>	database;
-	protected int									limit	= -1;
+@SuppressWarnings("serial")
+public abstract class OQueryAbstract<T extends Object> extends OCommandRequestAbstract implements OQuery<T> {
+	protected String	fetchPlan;
 
-	protected OQueryAbstract() {
+	public OQueryAbstract() {
 	}
 
-	protected OQueryAbstract(final ODatabaseRecord<REC> iDatabase) {
-		this.database = iDatabase;
+	@SuppressWarnings("unchecked")
+	public <RET> RET execute(final Object... iArgs) {
+		return (RET) run(iArgs);
 	}
 
-	public int getLimit() {
-		return limit;
+	public String getFetchPlan() {
+		return fetchPlan;
 	}
 
-	public void setLimit(int limit) {
-		this.limit = limit;
+	public OQuery<T> setFetchPlan(final String fetchPlan) {
+		OFetchHelper.checkFetchPlanValid(fetchPlan);
+		if (fetchPlan != null && fetchPlan.length() == 0)
+			this.fetchPlan = null;
+		else
+			this.fetchPlan = fetchPlan;
+		return this;
 	}
+
+	@Override
+	public void reset() {
+	}
+	
+	
 }

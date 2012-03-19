@@ -16,10 +16,16 @@
 package com.orientechnologies.orient.core.sql.query;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
 import com.orientechnologies.orient.core.command.OCommandResultListener;
-import com.orientechnologies.orient.core.record.ORecordSchemaAware;
+import com.orientechnologies.orient.core.db.record.OIdentifiable;
+import com.orientechnologies.orient.core.id.ORID;
+import com.orientechnologies.orient.core.id.ORecordId;
+import com.orientechnologies.orient.core.serialization.OMemoryStream;
 
 /**
  * SQL synchronous query. When executed the caller wait for the result.
@@ -29,9 +35,11 @@ import com.orientechnologies.orient.core.record.ORecordSchemaAware;
  * @param <T>
  * @see OSQLAsynchQuery
  */
-@SuppressWarnings("unchecked")
-public class OSQLSynchQuery<T extends ORecordSchemaAware<?>> extends OSQLAsynchQuery<T> implements OCommandResultListener {
-	protected final List<T>	result	= new ArrayList<T>();
+@SuppressWarnings({ "unchecked", "serial" })
+public class OSQLSynchQuery<T extends Object> extends OSQLAsynchQuery<T> implements OCommandResultListener, Iterable<T> {
+	private ORID								nextPageRID;
+	private final List<T>				result							= new ArrayList<T>();
+	private Map<Object, Object>	previousQueryParams	= new HashMap<Object, Object>();
 
 	public OSQLSynchQuery() {
 		resultListener = this;
@@ -47,18 +55,97 @@ public class OSQLSynchQuery<T extends ORecordSchemaAware<?>> extends OSQLAsynchQ
 		resultListener = this;
 	}
 
+	@Override
+	public void reset() {
+		result.clear();
+	}
+
 	public boolean result(final Object iRecord) {
 		result.add((T) iRecord);
 		return true;
 	}
 
 	@Override
-	public List<T> execute(Object... iArgs) {
-		super.execute(iArgs);
+	public List<T> run(Object... iArgs) {
+		if (!result.isEmpty()) {
+			result.clear();
+		}
+
+		final Map<Object, Object> queryParams;
+		queryParams = fetchQueryParams(iArgs);
+		resetNextRIDIfParametersWereChanged(queryParams);
+
+		super.run(iArgs);
+
+		if (!result.isEmpty()) {
+			previousQueryParams = new HashMap<Object, Object>(queryParams);
+			final ORID lastRid = ((OIdentifiable) result.get(result.size() - 1)).getIdentity();
+			nextPageRID = new ORecordId(lastRid.next());
+		}
+
 		return result;
+	}
+
+	private void resetNextRIDIfParametersWereChanged(final Map<Object, Object> queryParams) {
+		if (!queryParams.equals(previousQueryParams))
+			nextPageRID = null;
+	}
+
+	private Map<Object, Object> fetchQueryParams(Object... iArgs) {
+		if (iArgs.length > 0) {
+			return convertToParameters(iArgs);
+		}
+
+		Map<Object, Object> queryParams = getParameters();
+		if (queryParams == null)
+			queryParams = new HashMap<Object, Object>();
+		return queryParams;
 	}
 
 	public Object getResult() {
 		return result;
+	}
+
+	@Override
+	protected OMemoryStream queryToStream() {
+		final OMemoryStream buffer = super.queryToStream();
+
+		buffer.set(nextPageRID != null ? nextPageRID.toString() : "");
+
+		final byte[] queryParams = serializeQueryParameters(previousQueryParams);
+		buffer.set(queryParams);
+
+		return buffer;
+	}
+
+	@Override
+	protected void queryFromStream(OMemoryStream buffer) {
+		super.queryFromStream(buffer);
+
+		final String rid = buffer.getAsString();
+		if ("".equals(rid))
+			nextPageRID = null;
+		else
+			nextPageRID = new ORecordId(rid);
+
+		final byte[] serializedPrevParams = buffer.getAsByteArray();
+		previousQueryParams = deserializeQueryParameters(serializedPrevParams);
+
+	}
+
+	/**
+	 * @return RID of the record that will be processed first during pagination mode.
+	 */
+	public ORID getNextPageRID() {
+		return nextPageRID;
+	}
+
+	public void resetPagination() {
+		nextPageRID = null;
+	}
+
+	public Iterator<T> iterator() {
+		execute();
+		return ((Iterable<T>) getResult()).iterator();
 	}
 }

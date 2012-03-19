@@ -18,12 +18,37 @@ package com.orientechnologies.orient.enterprise.channel.text;
 import java.io.IOException;
 import java.net.Socket;
 
+import com.orientechnologies.orient.core.config.OContextConfiguration;
 import com.orientechnologies.orient.enterprise.channel.OChannel;
 
 public class OChannelText extends OChannel {
 
-	public OChannelText(final Socket iSocket) throws IOException {
-		super(iSocket);
+	public OChannelText(final Socket iSocket, final OContextConfiguration iConfig) throws IOException {
+		super(iSocket, iConfig);
+	}
+
+	/**
+	 * 
+	 * @param iBuffer
+	 *          byte[] to fill
+	 * @param iStartingPosition
+	 *          Offset to start to fill the buffer
+	 * @param iContentLength
+	 *          Length of expected content to read
+	 * @return total of bytes read
+	 * @throws IOException
+	 */
+	public int read(final byte[] iBuffer, final int iStartingPosition, final int iContentLength) throws IOException {
+		int pos;
+		int read = 0;
+		pos = iStartingPosition;
+
+		for (int required = iContentLength; required > 0; required -= read) {
+			read = inStream.read(iBuffer, pos, required);
+			pos += read;
+		}
+
+		return read;
 	}
 
 	public byte[] readBytes(final int iTotal) throws IOException {

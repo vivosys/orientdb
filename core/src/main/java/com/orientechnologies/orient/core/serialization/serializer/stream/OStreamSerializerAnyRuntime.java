@@ -15,15 +15,25 @@
  */
 package com.orientechnologies.orient.core.serialization.serializer.stream;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 
-import com.orientechnologies.common.log.OLogManager;
 import com.orientechnologies.orient.core.exception.OSerializationException;
-import com.orientechnologies.orient.core.serialization.OBinaryProtocol;
+import com.orientechnologies.orient.core.serialization.serializer.string.OStringSerializerAnyRuntime;
 
-public class OStreamSerializerAnyRuntime extends OStreamSerializerAbstract {
-	public static final OStreamSerializerAnyRuntime	INSTANCE	= new OStreamSerializerAnyRuntime();
+/**
+ * Uses the Java serialization.
+ * 
+ * @see OStringSerializerAnyRuntime
+ * @author Luca Garulli
+ * 
+ */
+public class OStreamSerializerAnyRuntime implements OStreamSerializer {
 	private static final String											NAME			= "au";
+	public static final OStreamSerializerAnyRuntime	INSTANCE	= new OStreamSerializerAnyRuntime();
 
 	public String getName() {
 		return NAME;
@@ -32,30 +42,32 @@ public class OStreamSerializerAnyRuntime extends OStreamSerializerAbstract {
 	/**
 	 * Re-Create any object if the class has a public constructor that accepts a String as unique parameter.
 	 */
-	public Object fromStream(byte[] iStream) throws IOException {
+	public Object fromStream(final byte[] iStream) throws IOException {
 		if (iStream == null || iStream.length == 0)
 			// NULL VALUE
 			return null;
 
-		String stream = OBinaryProtocol.bytes2string(iStream);
-		int pos = stream.indexOf(SEPARATOR);
-		if (pos < 0)
-			OLogManager.instance().error(this, "Class signature not found in ANY element: " + iStream, OSerializationException.class);
-
-		final String className = stream.substring(0, pos);
-
+		final ByteArrayInputStream is = new ByteArrayInputStream(iStream);
+		final ObjectInputStream in = new ObjectInputStream(is);
 		try {
-			Class<?> clazz = Class.forName(className);
-			return clazz.getDeclaredConstructor(String.class).newInstance(stream.substring(pos + 1));
-		} catch (Exception e) {
-			OLogManager.instance().error(this, "Error on unmarshalling content. Class: " + className, e, OSerializationException.class);
+			return in.readObject();
+		} catch (ClassNotFoundException e) {
+			throw new OSerializationException("Cannot unmarshall Java serialized object", e);
+		} finally {
+			in.close();
+			is.close();
 		}
-		return null;
 	}
 
-	public byte[] toStream(Object iObject) throws IOException {
+	public byte[] toStream(final Object iObject) throws IOException {
 		if (iObject == null)
 			return new byte[0];
-		return OBinaryProtocol.string2bytes(iObject.getClass().getName() + SEPARATOR + iObject);
+
+		final ByteArrayOutputStream os = new ByteArrayOutputStream();
+		final ObjectOutputStream oos = new ObjectOutputStream(os);
+		oos.writeObject(iObject);
+		oos.close();
+
+		return os.toByteArray();
 	}
 }

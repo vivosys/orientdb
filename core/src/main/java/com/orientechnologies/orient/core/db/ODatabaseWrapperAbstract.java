@@ -16,18 +16,21 @@
 package com.orientechnologies.orient.core.db;
 
 import java.util.Collection;
+import java.util.Iterator;
+import java.util.Map.Entry;
+import java.util.concurrent.Callable;
 
-import com.orientechnologies.orient.core.cache.OCacheRecord;
+import com.orientechnologies.orient.core.Orient;
+import com.orientechnologies.orient.core.cache.OLevel1RecordCache;
+import com.orientechnologies.orient.core.cache.OLevel2RecordCache;
 import com.orientechnologies.orient.core.exception.ODatabaseException;
 import com.orientechnologies.orient.core.intent.OIntent;
-import com.orientechnologies.orient.core.metadata.security.OUser;
-import com.orientechnologies.orient.core.record.ORecordInternal;
 import com.orientechnologies.orient.core.storage.OStorage;
+import com.orientechnologies.orient.core.storage.OStorage.CLUSTER_TYPE;
 
 @SuppressWarnings("unchecked")
-public abstract class ODatabaseWrapperAbstract<DB extends ODatabase, REC extends ORecordInternal<?>> implements ODatabase {
+public abstract class ODatabaseWrapperAbstract<DB extends ODatabase> implements ODatabase {
 	protected DB									underlying;
-	protected OUser								user;
 	protected ODatabaseComplex<?>	databaseOwner;
 
 	public ODatabaseWrapperAbstract(final DB iDatabase) {
@@ -37,16 +40,18 @@ public abstract class ODatabaseWrapperAbstract<DB extends ODatabase, REC extends
 
 	@Override
 	public void finalize() {
-		close();
+		// close();
 	}
 
 	public <THISDB extends ODatabase> THISDB open(final String iUserName, final String iUserPassword) {
 		underlying.open(iUserName, iUserPassword);
+		Orient.instance().getDatabaseFactory().register(databaseOwner);
 		return (THISDB) this;
 	}
 
 	public <THISDB extends ODatabase> THISDB create() {
 		underlying.create();
+		Orient.instance().getDatabaseFactory().register(databaseOwner);
 		return (THISDB) this;
 	}
 
@@ -54,25 +59,57 @@ public abstract class ODatabaseWrapperAbstract<DB extends ODatabase, REC extends
 		return underlying.exists();
 	}
 
-	public void close() {
-		underlying.close();
+	public void reload() {
+		underlying.reload();
 	}
 
-	public int getId() {
-		return underlying.getId();
+	public void close() {
+		underlying.close();
+		Orient.instance().getDatabaseFactory().unregister(databaseOwner);
+	}
+
+	/**
+	 * Uses drop() instead.
+	 */
+	@Deprecated
+	public void delete() {
+		drop();
+	}
+
+	public void drop() {
+		underlying.drop();
+		Orient.instance().getDatabaseFactory().unregister(databaseOwner);
+	}
+
+	public STATUS getStatus() {
+		return underlying.getStatus();
+	}
+
+	public <THISDB extends ODatabase> THISDB setStatus(final STATUS iStatus) {
+		underlying.setStatus(iStatus);
+		return (THISDB) this;
 	}
 
 	public String getName() {
 		return underlying.getName();
 	}
 
+	public String getURL() {
+		return underlying.getURL();
+	}
+
 	public OStorage getStorage() {
 		return underlying.getStorage();
 	}
 
-	public OCacheRecord getCache() {
+	public OLevel1RecordCache getLevel1Cache() {
 		checkOpeness();
-		return underlying.getCache();
+		return underlying.getLevel1Cache();
+	}
+
+	public OLevel2RecordCache getLevel2Cache() {
+		checkOpeness();
+		return getStorage().getLevel2Cache();
 	}
 
 	public boolean isClosed() {
@@ -94,9 +131,19 @@ public abstract class ODatabaseWrapperAbstract<DB extends ODatabase, REC extends
 		return underlying.countClusterElements(iClusterName);
 	}
 
+	public int getClusters() {
+		checkOpeness();
+		return underlying.getClusters();
+	}
+
 	public Collection<String> getClusterNames() {
 		checkOpeness();
 		return underlying.getClusterNames();
+	}
+
+	public String getClusterType(final String iClusterName) {
+		checkOpeness();
+		return underlying.getClusterType(iClusterName);
 	}
 
 	public int getClusterIdByName(final String iClusterName) {
@@ -109,14 +156,43 @@ public abstract class ODatabaseWrapperAbstract<DB extends ODatabase, REC extends
 		return underlying.getClusterNameById(iClusterId);
 	}
 
-	public int addLogicalCluster(final String iClassName, final int iPhyClusterContainerId) {
+	public long getClusterRecordSizeById(int iClusterId) {
+		return underlying.getClusterRecordSizeById(iClusterId);
+	}
+
+	public long getClusterRecordSizeByName(String iClusterName) {
+		return underlying.getClusterRecordSizeByName(iClusterName);
+	}
+
+	public int addCluster(final String iClusterName, final CLUSTER_TYPE iType) {
 		checkOpeness();
-		return underlying.addLogicalCluster(iClassName, iPhyClusterContainerId);
+		return underlying.addCluster(iClusterName, iType);
+	}
+
+	@Deprecated
+	public int addLogicalCluster(final String iClusterName, final int iPhyClusterContainerId) {
+		checkOpeness();
+		return underlying.addLogicalCluster(iClusterName, iPhyClusterContainerId);
 	}
 
 	public int addPhysicalCluster(final String iClusterName, final String iClusterFileName, final int iStartSize) {
 		checkOpeness();
 		return underlying.addPhysicalCluster(iClusterName, iClusterFileName, iStartSize);
+	}
+
+	public int addPhysicalCluster(final String iClusterName) {
+		checkOpeness();
+		return underlying.addPhysicalCluster(iClusterName, iClusterName, -1);
+	}
+
+	public boolean dropCluster(final String iClusterName) {
+		getLevel1Cache().freeCluster(getClusterIdByName(iClusterName));
+		return underlying.dropCluster(iClusterName);
+	}
+
+	public boolean dropCluster(final int iClusterId) {
+		getLevel1Cache().freeCluster(iClusterId);
+		return underlying.dropCluster(iClusterId);
 	}
 
 	public int addDataSegment(final String iSegmentName, final String iSegmentFileName) {
@@ -129,22 +205,13 @@ public abstract class ODatabaseWrapperAbstract<DB extends ODatabase, REC extends
 		return underlying.getDefaultClusterId();
 	}
 
-	public void declareIntent(final OIntent iIntent, final Object... iParams) {
+	public boolean declareIntent(final OIntent iIntent) {
 		checkOpeness();
-		underlying.declareIntent(iIntent, iParams);
-	}
-
-	public <DBTYPE extends ODatabase> DBTYPE checkSecurity(final String iResource, final int iOperation) {
-		return (DBTYPE) underlying.checkSecurity(iResource, iOperation);
+		return underlying.declareIntent(iIntent);
 	}
 
 	public <DBTYPE extends ODatabase> DBTYPE getUnderlying() {
 		return (DBTYPE) underlying;
-	}
-
-	protected void checkOpeness() {
-		if (isClosed())
-			throw new ODatabaseException("Database is closed");
 	}
 
 	public ODatabaseComplex<?> getDatabaseOwner() {
@@ -154,5 +221,57 @@ public abstract class ODatabaseWrapperAbstract<DB extends ODatabase, REC extends
 	public ODatabaseComplex<?> setDatabaseOwner(final ODatabaseComplex<?> iOwner) {
 		databaseOwner = iOwner;
 		return (ODatabaseComplex<?>) this;
+	}
+
+	@Override
+	public boolean equals(final Object iOther) {
+		if (!(iOther instanceof ODatabase))
+			return false;
+
+		final ODatabase other = (ODatabase) iOther;
+
+		return other.getName().equals(getName());
+	}
+
+	@Override
+	public String toString() {
+		return underlying.toString();
+	}
+
+	public Object setProperty(final String iName, final Object iValue) {
+		return underlying.setProperty(iName, iValue);
+	}
+
+	public Object getProperty(final String iName) {
+		return underlying.getProperty(iName);
+	}
+
+	public Iterator<Entry<String, Object>> getProperties() {
+		return underlying.getProperties();
+	}
+
+	public Object get(final ATTRIBUTES iAttribute) {
+		return underlying.get(iAttribute);
+	}
+
+	public <THISDB extends ODatabase> THISDB set(final ATTRIBUTES attribute, final Object iValue) {
+		return (THISDB) underlying.set(attribute, iValue);
+	}
+
+	public void registerListener(final ODatabaseListener iListener) {
+		underlying.registerListener(iListener);
+	}
+
+	public void unregisterListener(final ODatabaseListener iListener) {
+		underlying.unregisterListener(iListener);
+	}
+
+	public <V> V callInLock(Callable<V> iCallable, boolean iExclusiveLock) {
+		return getStorage().callInLock(iCallable, iExclusiveLock);
+	}
+
+	protected void checkOpeness() {
+		if (isClosed())
+			throw new ODatabaseException("Database '" + getURL() + "' is closed");
 	}
 }

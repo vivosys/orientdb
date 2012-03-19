@@ -15,34 +15,38 @@
  */
 package com.orientechnologies.orient.core.sql.filter;
 
+import java.util.List;
+
+import com.orientechnologies.orient.core.command.OCommandContext;
+import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.query.OQueryRuntimeValueMulti;
-import com.orientechnologies.orient.core.record.ORecordInternal;
-import com.orientechnologies.orient.core.record.ORecordSchemaAware;
+import com.orientechnologies.orient.core.record.impl.ODocument;
+import com.orientechnologies.orient.core.record.impl.ODocumentHelper;
 
 /**
- * Represent one or more object fields as value in the query condition.
+ * Represents one or more object fields as value in the query condition.
  * 
  * @author Luca Garulli
  * 
  */
 public abstract class OSQLFilterItemFieldMultiAbstract extends OSQLFilterItemAbstract {
-	private String[]	names;
+	private List<String>	names;
 
-	public OSQLFilterItemFieldMultiAbstract(final OSQLFilter iQueryCompiled, final String iName, final String[] iNames) {
+	public OSQLFilterItemFieldMultiAbstract(final OSQLFilter iQueryCompiled, final String iName, final List<String> iNames) {
 		super(iQueryCompiled, iName);
 		names = iNames;
 	}
 
-	public Object getValue(final ORecordInternal<?> iRecord) {
-		if (names.length == 1)
-			return transformValue(((ORecordSchemaAware<?>) iRecord).field(names[0]));
+	public Object getValue(final OIdentifiable iRecord, OCommandContext iContetx) {
+		if (names.size() == 1)
+			return transformValue(iRecord, ODocumentHelper.getIdentifiableValue(iRecord, names.get(0)));
 
-		Object[] values = ((ORecordSchemaAware<?>) iRecord).fieldValues();
+		final Object[] values = ((ODocument) iRecord).fieldValues();
 
 		if (hasChainOperators()) {
 			// TRANSFORM ALL THE VALUES
 			for (int i = 0; i < values.length; ++i)
-				values[i] = transformValue(values[i]);
+				values[i] = transformValue(iRecord, values[i]);
 		}
 
 		return new OQueryRuntimeValueMulti(this, values);

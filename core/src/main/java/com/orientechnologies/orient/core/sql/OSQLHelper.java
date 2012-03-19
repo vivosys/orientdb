@@ -15,23 +15,31 @@
  */
 package com.orientechnologies.orient.core.sql;
 
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Map.Entry;
+
 import com.orientechnologies.common.parser.OStringParser;
+import com.orientechnologies.orient.core.command.OCommandContext;
+import com.orientechnologies.orient.core.command.OCommandToParse;
+import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.id.ORecordId;
-import com.orientechnologies.orient.core.sql.operator.OQueryOperator;
-import com.orientechnologies.orient.core.sql.operator.OQueryOperatorAnd;
-import com.orientechnologies.orient.core.sql.operator.OQueryOperatorContains;
-import com.orientechnologies.orient.core.sql.operator.OQueryOperatorContainsAll;
-import com.orientechnologies.orient.core.sql.operator.OQueryOperatorEquals;
-import com.orientechnologies.orient.core.sql.operator.OQueryOperatorIn;
-import com.orientechnologies.orient.core.sql.operator.OQueryOperatorIs;
-import com.orientechnologies.orient.core.sql.operator.OQueryOperatorLike;
-import com.orientechnologies.orient.core.sql.operator.OQueryOperatorMajor;
-import com.orientechnologies.orient.core.sql.operator.OQueryOperatorMajorEquals;
-import com.orientechnologies.orient.core.sql.operator.OQueryOperatorMinor;
-import com.orientechnologies.orient.core.sql.operator.OQueryOperatorMinorEquals;
-import com.orientechnologies.orient.core.sql.operator.OQueryOperatorNot;
-import com.orientechnologies.orient.core.sql.operator.OQueryOperatorOr;
-import com.orientechnologies.orient.core.sql.operator.OQueryOperatorTraverse;
+import com.orientechnologies.orient.core.metadata.schema.OType;
+import com.orientechnologies.orient.core.record.ORecordInternal;
+import com.orientechnologies.orient.core.record.impl.ODocument;
+import com.orientechnologies.orient.core.record.impl.ODocumentHelper;
+import com.orientechnologies.orient.core.serialization.serializer.OStringSerializerHelper;
+import com.orientechnologies.orient.core.serialization.serializer.record.string.ORecordSerializerCSVAbstract;
+import com.orientechnologies.orient.core.sql.filter.OSQLFilter;
+import com.orientechnologies.orient.core.sql.filter.OSQLFilterItem;
+import com.orientechnologies.orient.core.sql.filter.OSQLFilterItemField;
+import com.orientechnologies.orient.core.sql.filter.OSQLFilterItemParameter;
+import com.orientechnologies.orient.core.sql.filter.OSQLFilterItemVariable;
+import com.orientechnologies.orient.core.sql.functions.OSQLFunctionRuntime;
 
 /**
  * SQL Helper class
@@ -40,30 +48,11 @@ import com.orientechnologies.orient.core.sql.operator.OQueryOperatorTraverse;
  * 
  */
 public class OSQLHelper {
-	public static final String			NAME						= "sql";
+	public static final String	NAME							= "sql";
 
-	public static final String			CLUSTER_PREFIX	= "CLUSTER:";
-	public static final String			CLASS_PREFIX		= "CLASS:";
-
-	public static final String			KEYWORD_SELECT	= "SELECT";
-	public static final String			KEYWORD_INSERT	= "INSERT";
-	public static final String			KEYWORD_UPDATE	= "UPDATE";
-	public static final String			KEYWORD_DELETE	= "DELETE";
-	public static final String			KEYWORD_FROM		= "FROM";
-	public static final String			KEYWORD_WHERE		= "WHERE";
-	public static final String			KEYWORD_COLUMN	= "COLUMN";
-
-	public static OQueryOperator[]	OPERATORS				= { new OQueryOperatorAnd(), new OQueryOperatorOr(), new OQueryOperatorNot(),
-			new OQueryOperatorEquals(), new OQueryOperatorMinorEquals(), new OQueryOperatorMinor(), new OQueryOperatorMajorEquals(),
-			new OQueryOperatorContainsAll(), new OQueryOperatorMajor(), new OQueryOperatorLike(), new OQueryOperatorIs(),
-			new OQueryOperatorIn(), new OQueryOperatorContains(), new OQueryOperatorTraverse() };
-
-	public static int jumpWhiteSpaces(final String iText, int iCurrentPosition) {
-		for (; iCurrentPosition < iText.length(); ++iCurrentPosition)
-			if (!Character.isWhitespace(iText.charAt(iCurrentPosition)))
-				break;
-		return iCurrentPosition;
-	}
+	public static final String	VALUE_NOT_PARSED	= "_NOT_PARSED_";
+	public static final String	NOT_NULL					= "_NOT_NULL_";
+	public static final String	DEFINED						= "_DEFINED_";
 
 	public static int nextWord(final String iText, final String iTextUpperCase, int ioCurrentPosition, final StringBuilder ioWord,
 			final boolean iForceUpperCase) {
@@ -72,13 +61,14 @@ public class OSQLHelper {
 
 	public static int nextWord(final String iText, final String iTextUpperCase, int ioCurrentPosition, final StringBuilder ioWord,
 			final boolean iForceUpperCase, final String iSeparatorChars) {
-		ioCurrentPosition = OSQLHelper.jumpWhiteSpaces(iText, ioCurrentPosition);
-		if (ioCurrentPosition >= iText.length())
+		ioWord.setLength(0);
+
+		ioCurrentPosition = OStringParser.jumpWhiteSpaces(iText, ioCurrentPosition);
+		if (ioCurrentPosition < 0)
 			return -1;
 
-		final String word = OStringParser.getWord(iForceUpperCase ? iTextUpperCase : iText, ioCurrentPosition, iSeparatorChars);
-
-		ioWord.setLength(0);
+		final String word = OStringParser.getWordFromString(iForceUpperCase ? iTextUpperCase : iText, ioCurrentPosition,
+				iSeparatorChars);
 
 		if (word != null && word.length() > 0) {
 			ioWord.append(word);
@@ -88,53 +78,202 @@ public class OSQLHelper {
 		return ioCurrentPosition;
 	}
 
-	public static OQueryOperator[] getOperators() {
-		return OPERATORS;
-	}
-
-	public static void registerOperator(final OQueryOperator iOperator) {
-		OQueryOperator[] ops = new OQueryOperator[OPERATORS.length + 1];
-		System.arraycopy(OPERATORS, 0, ops, 0, OPERATORS.length);
-		OPERATORS = ops;
-	}
-
 	/**
-	 * Convert fields from text to real value. Supports: String, RID, Float and Integer.
+	 * Convert fields from text to real value. Supports: String, RID, Boolean, Float, Integer and NULL.
 	 * 
-	 * @param values
-	 * @return
+	 * @param iDatabase
+	 * @param iValue
+	 *          Value to convert.
+	 * @return The value converted if recognized, otherwise VALUE_NOT_PARSED
 	 */
-	public static Object convertValue(final String iValue) {
+	public static Object parseValue(String iValue, final OCommandContext iContext) {
 		if (iValue == null)
 			return null;
 
-		Object fieldValue = null;
+		iValue = iValue.trim();
 
-		if (iValue.startsWith("'") && iValue.endsWith("'"))
+		Object fieldValue = VALUE_NOT_PARSED;
+
+		if (iValue.startsWith("'") && iValue.endsWith("'") || iValue.startsWith("\"") && iValue.endsWith("\""))
 			// STRING
-			fieldValue = iValue.substring(1, iValue.length() - 1);
-		else if (iValue.indexOf(":") > -1)
+			fieldValue = OStringSerializerHelper.getStringContent(iValue);
+		else if (iValue.charAt(0) == OStringSerializerHelper.COLLECTION_BEGIN
+				&& iValue.charAt(iValue.length() - 1) == OStringSerializerHelper.COLLECTION_END) {
+			// COLLECTION/ARRAY
+			final List<String> items = OStringSerializerHelper.smartSplit(iValue.substring(1, iValue.length() - 1),
+					OStringSerializerHelper.RECORD_SEPARATOR);
+
+			final List<Object> coll = new ArrayList<Object>();
+			for (String item : items) {
+				coll.add(parseValue(item, iContext));
+			}
+			fieldValue = coll;
+
+		} else if (iValue.charAt(0) == OStringSerializerHelper.MAP_BEGIN
+				&& iValue.charAt(iValue.length() - 1) == OStringSerializerHelper.MAP_END) {
+			// MAP
+			final List<String> items = OStringSerializerHelper.smartSplit(iValue.substring(1, iValue.length() - 1),
+					OStringSerializerHelper.RECORD_SEPARATOR);
+
+			final Map<Object, Object> map = new HashMap<Object, Object>();
+			for (String item : items) {
+				final List<String> parts = OStringSerializerHelper.smartSplit(item, OStringSerializerHelper.ENTRY_SEPARATOR);
+
+				if (parts == null || parts.size() != 2)
+					throw new OCommandSQLParsingException("Map found but entries are not defined as <key>:<value>");
+
+				map.put(parseValue(parts.get(0), iContext), parseValue(parts.get(1), iContext));
+			}
+
+			if (map.containsKey(ODocumentHelper.ATTRIBUTE_TYPE))
+				// IT'S A DOCUMENT
+				fieldValue = new ODocument(map);
+			else
+				fieldValue = map;
+		} else if (iValue.charAt(0) == ORID.PREFIX)
 			// RID
-			fieldValue = new ORecordId(iValue);
+			fieldValue = new ORecordId(iValue.trim());
 		else {
-			String upperCase = iValue.toUpperCase();
+
+			final String upperCase = iValue.toUpperCase(Locale.ENGLISH);
 			if (upperCase.equals("NULL"))
 				// NULL
 				fieldValue = null;
-			if (upperCase.equals("TRUE"))
+			else if (upperCase.equals("NOT NULL"))
+				// NULL
+				fieldValue = NOT_NULL;
+			else if (upperCase.equals("DEFINED"))
+				// NULL
+				fieldValue = DEFINED;
+			else if (upperCase.equals("TRUE"))
 				// BOOLEAN, TRUE
 				fieldValue = Boolean.TRUE;
 			else if (upperCase.equals("FALSE"))
 				// BOOLEAN, FALSE
 				fieldValue = Boolean.FALSE;
-			// NUMBER
-			else if (iValue.contains("."))
-				// FLOAT/DOUBLE
-				fieldValue = new Float(iValue);
-			else
-				fieldValue = new Integer(iValue);
+			else {
+				final Object v = parseStringNumber(iValue);
+				if (v != null)
+					fieldValue = v;
+			}
 		}
 
 		return fieldValue;
+	}
+
+	public static Object parseStringNumber(final String iValue) {
+		final OType t = ORecordSerializerCSVAbstract.getType(iValue);
+
+		if (t == OType.INTEGER)
+			return Integer.parseInt(iValue);
+		else if (t == OType.LONG)
+			return Long.parseLong(iValue);
+		else if (t == OType.FLOAT)
+			return Float.parseFloat(iValue);
+		else if (t == OType.SHORT)
+			return Short.parseShort(iValue);
+		else if (t == OType.BYTE)
+			return Byte.parseByte(iValue);
+		else if (t == OType.DOUBLE)
+			return Double.parseDouble(iValue);
+		else if (t == OType.DATE || t == OType.DATETIME)
+			return new Date(Long.parseLong(iValue));
+
+		return null;
+	}
+
+	public static Object parseValue(final OSQLFilter iSQLFilter, final OCommandToParse iCommand, final String iWord,
+			final OCommandContext iContext) {
+		if (iWord.charAt(0) == OStringSerializerHelper.PARAMETER_POSITIONAL
+				|| iWord.charAt(0) == OStringSerializerHelper.PARAMETER_NAMED) {
+			if (iSQLFilter != null)
+				return iSQLFilter.addParameter(iWord);
+			else
+				return new OSQLFilterItemParameter(iWord);
+		} else
+			return parseValue(iCommand, iWord, iContext);
+	}
+
+	public static Object parseValue(final OCommandToParse iCommand, final String iWord, final OCommandContext iContext) {
+		if (iWord.equals("*"))
+			return "*";
+
+		// TRY TO PARSE AS RAW VALUE
+		final Object v = parseValue(iWord, iContext);
+		if (v != VALUE_NOT_PARSED)
+			return v;
+
+		// TRY TO PARSE AS FUNCTION
+		final Object func = OSQLHelper.getFunction(iCommand, iWord);
+		if (func != null)
+			return func;
+
+		if (iWord.startsWith("$"))
+			// CONTEXT VARIABLE
+			return new OSQLFilterItemVariable(iCommand, iWord);
+
+		// PARSE AS FIELD
+		return new OSQLFilterItemField(iCommand, iWord);
+	}
+
+	public static Object getFunction(final OCommandToParse iCommand, final String iWord) {
+		final int separator = iWord.indexOf('.');
+		final int beginParenthesis = iWord.indexOf(OStringSerializerHelper.EMBEDDED_BEGIN);
+		if (beginParenthesis > -1 && (separator == -1 || separator > beginParenthesis)) {
+			final int endParenthesis = iWord.indexOf(OStringSerializerHelper.EMBEDDED_END, beginParenthesis);
+
+			if (endParenthesis > -1 && Character.isLetter(iWord.charAt(0)))
+				// FUNCTION: CREATE A RUN-TIME CONTAINER FOR IT TO SAVE THE PARAMETERS
+				return new OSQLFunctionRuntime(iCommand, iWord);
+		}
+
+		return null;
+	}
+
+	public static Object getValue(final Object iObject) {
+		if (iObject == null)
+			return null;
+
+		if (iObject instanceof OSQLFilterItem)
+			return ((OSQLFilterItem) iObject).getValue(null, null);
+
+		return iObject;
+	}
+
+	public static Object getValue(final Object iObject, final ORecordInternal<?> iRecord) {
+		if (iObject == null)
+			return null;
+
+		if (iObject instanceof OSQLFilterItem)
+			return ((OSQLFilterItem) iObject).getValue(iRecord, null);
+
+		return iObject;
+	}
+
+	public static void bindParameters(final ODocument iDocument, final Map<String, Object> iFields, final Map<Object, Object> iArgs) {
+		int paramCounter = 0;
+
+		// BIND VALUES
+		for (Entry<String, Object> field : iFields.entrySet()) {
+			if (field.getValue() instanceof OSQLFilterItemField) {
+				final OSQLFilterItemField f = (OSQLFilterItemField) field.getValue();
+				if (f.getRoot().equals("?")) {
+					// POSITIONAL PARAMETER
+					iDocument.field(field.getKey(), iArgs.get(paramCounter++));
+					continue;
+				} else if (f.getRoot().startsWith(":")) {
+					// NAMED PARAMETER
+					iDocument.field(field.getKey(), iArgs.get(f.getRoot().substring(1)));
+					continue;
+				}
+			}
+
+			if (field.getValue() instanceof ODocument && !((ODocument) field.getValue()).getIdentity().isValid())
+				// EMBEDDED DOCUMENT
+				((ODocument) field.getValue()).addOwner(iDocument);
+			
+			iDocument.field(field.getKey(), OSQLHelper.getValue(field.getValue(), iDocument));
+		}
+
 	}
 }

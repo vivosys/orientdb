@@ -20,16 +20,22 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
 
-public abstract class OChannel {
-	public Socket								socket;
+import com.orientechnologies.common.concur.resource.OSharedResourceExternalTimeout;
+import com.orientechnologies.orient.core.config.OContextConfiguration;
+import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 
-	public InputStream					inStream;
-	public OutputStream					outStream;
+public abstract class OChannel extends OSharedResourceExternalTimeout {
+	public Socket				socket;
 
-	public static final int	DEFAULT_BUFFER_SIZE	= 16384;
+	public InputStream	inStream;
+	public OutputStream	outStream;
 
-	public OChannel(Socket iSocket) throws IOException {
+	public int					socketBufferSize;
+
+	public OChannel(final Socket iSocket, final OContextConfiguration iConfig) throws IOException {
+		super(OGlobalConfiguration.NETWORK_LOCK_TIMEOUT.getValueAsInteger());
 		socket = iSocket;
+		socketBufferSize = iConfig.getValueAsInteger(OGlobalConfiguration.NETWORK_SOCKET_BUFFER_SIZE);
 	}
 
 	public void flush() throws IOException {
@@ -38,18 +44,26 @@ public abstract class OChannel {
 
 	public void close() {
 		try {
-			socket.close();
+			if (socket != null)
+				socket.close();
 		} catch (IOException e) {
 		}
 
 		try {
-			inStream.close();
+			if (inStream != null)
+				inStream.close();
 		} catch (IOException e) {
 		}
 
 		try {
-			outStream.close();
+			if (outStream != null)
+				outStream.close();
 		} catch (IOException e) {
 		}
+	}
+
+	@Override
+	public String toString() {
+		return socket != null ? socket.getRemoteSocketAddress().toString() : "Not connected";
 	}
 }

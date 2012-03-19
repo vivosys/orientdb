@@ -15,6 +15,10 @@
  */
 package com.orientechnologies.orient.core.command;
 
+import java.util.Map;
+
+import com.orientechnologies.common.listener.OProgressListener;
+
 /**
  * Generic GOF command pattern implementation.
  * 
@@ -35,7 +39,7 @@ public interface OCommandExecutor {
 	 * @see #execute(Object...)
 	 * @return
 	 */
-	public <RET extends OCommandExecutor> RET parse(OCommandRequestInternal iRequest);
+	public <RET extends OCommandExecutor> RET parse(OCommandRequestText iRequest);
 
 	/**
 	 * Execute the requested command parsed previously.
@@ -46,18 +50,20 @@ public interface OCommandExecutor {
 	 * @see #parse(OCommandRequestInternal)
 	 * @return
 	 */
-	public Object execute(final Object... iArgs);
+	public Object execute(final Map<Object, Object> iArgs);
 
 	/**
-	 * Execute the requested command after parsing it.
+	 * Set the listener invoked while the command is executing.
 	 * 
-	 * @param iRequest
-	 *          Command request implementation.
-	 * @param iArgs
-	 *          Optional variable arguments to pass to the command.
-	 * 
-	 * @see #execute(Object...)
+	 * @param progressListener
+	 *          OProgressListener implementation
 	 * @return
 	 */
-	public Object execute(OCommandRequestInternal iRequest, final Object... iArgs);
+	public <RET extends OCommandExecutor> RET setProgressListener(OProgressListener progressListener);
+
+	public <RET extends OCommandExecutor> RET setLimit(int iLimit);
+
+	public Map<Object, Object> getParameters();
+
+	public OCommandContext getContext();
 }

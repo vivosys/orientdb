@@ -15,41 +15,30 @@
  */
 package com.orientechnologies.orient.server.db;
 
-import com.orientechnologies.orient.core.db.ODatabasePool;
+import java.util.Map;
+
+import com.orientechnologies.common.concur.resource.OResourcePool;
+import com.orientechnologies.orient.core.db.document.ODatabaseDocumentPool;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
-import com.orientechnologies.orient.core.engine.memory.OEngineMemory;
 import com.orientechnologies.orient.server.OServerMain;
 
 public class OSharedDocumentDatabase {
-	// TODO: ALLOW ONLY 1 BECAUSE THE TREE IS NOT YET FULLY TRANSACTIONAL
-	private static final ODatabasePool<ODatabaseDocumentTx>	dbPool	= new ODatabasePool<ODatabaseDocumentTx>(1) {
+	public static ODatabaseDocumentTx acquire(final String iName, final String iUserName, final String iUserPassword)
+			throws InterruptedException {
+		final String path = OServerMain.server().getStoragePath(iName);
 
-																																		public ODatabaseDocumentTx createNewResource(
-																																				final String iDatabaseName) {
-																																			final String path = OServerMain.server().getStoragePath(
-																																					iDatabaseName);
-
-																																			final ODatabaseDocumentTx db = new ODatabaseDocumentTx(path);
-
-																																			if (path.startsWith(OEngineMemory.NAME)) {
-																																				// CREATE AND PUT IN THE MEMORY MAPTABLE TO AVOID LOCKING
-																																				// (IT'S
-																																				// THREAD SAFE)
-																																				db.create();
-																																				OServerMain.server().getMemoryDatabases().put(
-																																						iDatabaseName, db);
-																																			} else
-																																				db.open("admin", "admin");
-
-																																			return db;
-																																		}
-																																	};
-
-	public static ODatabaseDocumentTx acquireDatabase(String iName) throws InterruptedException {
-		return dbPool.acquireDatabase(iName);
+		return ODatabaseDocumentPool.global().acquire(path, iUserName, iUserPassword);
 	}
 
-	public static void releaseDatabase(final ODatabaseDocumentTx iDatabase) {
-		dbPool.releaseDatabase(iDatabase.getName(), iDatabase);
+	public static void release(final ODatabaseDocumentTx iDatabase) {
+		ODatabaseDocumentPool.global().release(iDatabase);
+	}
+
+	public static Map<String, OResourcePool<String, ODatabaseDocumentTx>> getDatabasePools() {
+		return ODatabaseDocumentPool.global().getPools();
+	}
+
+	public static void remove(String iName, String iUser) {
+		ODatabaseDocumentPool.global().remove(iName, iUser);
 	}
 }

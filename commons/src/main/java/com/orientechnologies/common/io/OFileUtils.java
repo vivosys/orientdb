@@ -1,6 +1,7 @@
 package com.orientechnologies.common.io;
 
 import java.io.File;
+import java.util.Locale;
 
 public class OFileUtils {
 	private static final int	KILOBYTE	= 1024;
@@ -8,41 +9,65 @@ public class OFileUtils {
 	private static final int	GIGABYTE	= 1073741824;
 	private static final long	TERABYTE	= 1099511627776L;
 
-	public static long getSizeAsNumber(String iSize) {
-		try {
-			return Long.parseLong(iSize);
-		} catch (NumberFormatException e) {
-			iSize = iSize.toUpperCase();
-			int pos = iSize.indexOf("KB");
-			if (pos > -1)
-				return Long.parseLong(iSize.substring(0, pos)) * KILOBYTE;
+	@SuppressWarnings("unchecked")
+	public static long getSizeAsNumber(final Object iSize) {
+		if (iSize == null)
+			throw new IllegalArgumentException("Size is null");
 
-			pos = iSize.indexOf("MB");
-			if (pos > -1)
-				return Long.parseLong(iSize.substring(0, pos)) * MEGABYTE;
+		if (iSize instanceof Number)
+			return ((Number) iSize).longValue();
 
-			pos = iSize.indexOf("GB");
-			if (pos > -1)
-				return Long.parseLong(iSize.substring(0, pos)) * GIGABYTE;
+		String size = iSize.toString();
 
-			pos = iSize.indexOf("TB");
-			if (pos > -1)
-				return Long.parseLong(iSize.substring(0, pos)) * TERABYTE;
+		boolean number = true;
+		for (int i = size.length() - 1; i >= 0; --i) {
+			if (!Character.isDigit(size.charAt(i))) {
+				number = false;
+				break;
+			}
+		}
 
-			pos = iSize.indexOf("B");
+		if (number)
+			return string2number(size).longValue();
+		else {
+			size = size.toUpperCase(Locale.ENGLISH);
+			int pos = size.indexOf("KB");
 			if (pos > -1)
-				return Long.parseLong(iSize.substring(0, pos));
+				return (long) (string2number(size.substring(0, pos)).floatValue() * KILOBYTE);
 
-			pos = iSize.indexOf("%");
+			pos = size.indexOf("MB");
 			if (pos > -1)
-				return -1 * Long.parseLong(iSize.substring(0, pos));
+				return (long) (string2number(size.substring(0, pos)).floatValue() * MEGABYTE);
+
+			pos = size.indexOf("GB");
+			if (pos > -1)
+				return (long) (string2number(size.substring(0, pos)).floatValue() * GIGABYTE);
+
+			pos = size.indexOf("TB");
+			if (pos > -1)
+				return (long) (string2number(size.substring(0, pos)).floatValue() * TERABYTE);
+
+			pos = size.indexOf('B');
+			if (pos > -1)
+				return (long) string2number(size.substring(0, pos)).floatValue();
+
+			pos = size.indexOf('%');
+			if (pos > -1)
+				return (long) (-1 * string2number(size.substring(0, pos)).floatValue());
 
 			// RE-THROW THE EXCEPTION
-			throw e;
+			throw new IllegalArgumentException("Size " + size + " has a unrecognizable format");
 		}
 	}
 
-	public static String getSizeAsString(long iSize) {
+	public static Number string2number(final String iText) {
+		if (iText.indexOf('.') > -1)
+			return Double.parseDouble(iText);
+		else
+			return Long.parseLong(iText);
+	}
+
+	public static String getSizeAsString(final long iSize) {
 		if (iSize > TERABYTE)
 			return String.format("%2.2fTb", (float) iSize / TERABYTE);
 		if (iSize > GIGABYTE)
@@ -65,12 +90,14 @@ public class OFileUtils {
 	}
 
 	public static void createDirectoryTree(final String iFileName) {
-		String[] fileDirectories = iFileName.split("/");
+		final String[] fileDirectories = iFileName.split("/");
 		for (int i = 0; i < fileDirectories.length - 1; ++i)
 			new File(fileDirectories[i]).mkdir();
 	}
 
 	public static String getPath(final String iPath) {
+		if (iPath == null)
+			return null;
 		return iPath.replace('\\', '/');
 	}
 }

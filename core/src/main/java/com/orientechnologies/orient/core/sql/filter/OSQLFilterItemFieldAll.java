@@ -15,7 +15,8 @@
  */
 package com.orientechnologies.orient.core.sql.filter;
 
-import com.orientechnologies.orient.core.query.OQueryHelper;
+import com.orientechnologies.orient.core.command.OCommandToParse;
+import com.orientechnologies.orient.core.serialization.serializer.OStringSerializerHelper;
 
 /**
  * Represent one or more object fields as value in the query condition.
@@ -24,9 +25,19 @@ import com.orientechnologies.orient.core.query.OQueryHelper;
  * 
  */
 public class OSQLFilterItemFieldAll extends OSQLFilterItemFieldMultiAbstract {
-	public static final String	NAME	= "ALL";
+	public static final String	NAME			= "ALL";
+	public static final String	FULL_NAME	= "ALL()";
 
 	public OSQLFilterItemFieldAll(final OSQLFilter iQueryCompiled, final String iName) {
-		super(iQueryCompiled, iName, OQueryHelper.getParameters(iName));
+		super(iQueryCompiled, iName, OStringSerializerHelper.getParameters(iName));
+	}
+
+	@Override
+	public String getRoot() {
+		return FULL_NAME;
+	}
+
+	@Override
+	protected void setRoot(final OCommandToParse iQueryToParse, final String iRoot) {
 	}
 }

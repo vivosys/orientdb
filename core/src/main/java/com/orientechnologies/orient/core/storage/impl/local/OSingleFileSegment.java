@@ -17,36 +17,49 @@ package com.orientechnologies.orient.core.storage.impl.local;
 
 import java.io.IOException;
 
-import com.orientechnologies.common.concur.resource.OSharedResourceAdaptiveLinked;
+import com.orientechnologies.common.concur.resource.OSharedResourceAdaptive;
 import com.orientechnologies.common.io.OFileUtils;
 import com.orientechnologies.common.log.OLogManager;
+import com.orientechnologies.common.parser.OSystemVariableResolver;
+import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 import com.orientechnologies.orient.core.config.OStorageFileConfiguration;
 import com.orientechnologies.orient.core.storage.fs.OFile;
 import com.orientechnologies.orient.core.storage.fs.OFileFactory;
+import com.orientechnologies.orient.core.storage.fs.OMMapManager;
 
-public class OSingleFileSegment extends OSharedResourceAdaptiveLinked {
+public class OSingleFileSegment extends OSharedResourceAdaptive {
 	protected OStorageLocal							storage;
 	protected OFile											file;
 	protected OStorageFileConfiguration	config;
 
-	public OSingleFileSegment(OStorageLocal iStorage, final OStorageFileConfiguration iConfig) throws IOException {
-		super(iStorage);
+	public OSingleFileSegment(final String iPath, final String iType) throws IOException {
+		super(OGlobalConfiguration.ENVIRONMENT_CONCURRENT.getValueAsBoolean(), 0, true);
+		file = OFileFactory.instance().create(iType, OSystemVariableResolver.resolveSystemVariables(iPath), "rw");
+	}
+
+	public OSingleFileSegment(final OStorageLocal iStorage, final OStorageFileConfiguration iConfig) throws IOException {
+		this(iStorage, iConfig, iConfig.type);
+	}
+
+	public OSingleFileSegment(final OStorageLocal iStorage, final OStorageFileConfiguration iConfig, final String iType)
+			throws IOException {
+		super(OGlobalConfiguration.ENVIRONMENT_CONCURRENT.getValueAsBoolean());
+
 		config = iConfig;
 		storage = iStorage;
-		file = OFileFactory.create(iConfig.type, iStorage.getVariableParser().resolveVariables(iConfig.path), iStorage.getMode());
+		file = OFileFactory.instance().create(iType, iStorage.getVariableParser().resolveVariables(iConfig.path), iStorage.getMode());
 		file.setMaxSize((int) OFileUtils.getSizeAsNumber(iConfig.maxSize));
 		file.setIncrementSize((int) OFileUtils.getSizeAsNumber(iConfig.incrementSize));
 	}
 
 	public boolean open() throws IOException {
+		acquireExclusiveLock();
 		try {
-			acquireExclusiveLock();
-
 			boolean softClosed = file.open();
 			if (!softClosed) {
 				// LAST TIME THE FILE WAS NOT CLOSED IN SOFT WAY
 				OLogManager.instance().warn(this,
-						"File " + file.getOsFile().getAbsolutePath() + " was not closed correctly last time. Checking segments...");
+						"File " + file.getAbsolutePath() + " was not closed correctly last time. Checking segments...");
 			}
 
 			return softClosed;
@@ -55,10 +68,9 @@ public class OSingleFileSegment extends OSharedResourceAdaptiveLinked {
 		}
 	}
 
-	public void create(int iStartSize) throws IOException {
+	public void create(final int iStartSize) throws IOException {
+		acquireExclusiveLock();
 		try {
-			acquireExclusiveLock();
-
 			file.create(iStartSize);
 		} finally {
 			releaseExclusiveLock();
@@ -66,14 +78,58 @@ public class OSingleFileSegment extends OSharedResourceAdaptiveLinked {
 	}
 
 	public void close() throws IOException {
+		acquireExclusiveLock();
 		try {
-			acquireExclusiveLock();
-
 			if (file != null)
 				file.close();
 
 		} finally {
 			releaseExclusiveLock();
 		}
+	}
+
+	public void delete() throws IOException {
+		acquireExclusiveLock();
+		try {
+			if (file != null) {
+				file.delete();
+				OMMapManager.removeFile(file);
+				file = null;
+			}
+
+		} finally {
+			releaseExclusiveLock();
+		}
+	}
+
+	public void truncate() throws IOException {
+		acquireExclusiveLock();
+		try {
+			// SHRINK TO 0
+			file.shrink(0);
+
+		} finally {
+			releaseExclusiveLock();
+		}
+	}
+
+	public boolean exists() {
+		return file.exists();
+	}
+
+	public long getSize() {
+		return file.getFileSize();
+	}
+
+	public long getFilledUpTo() {
+		return file.getFilledUpTo();
+	}
+
+	public OStorageFileConfiguration getConfig() {
+		return config;
+	}
+
+	public OFile getFile() {
+		return file;
 	}
 }

@@ -15,8 +15,6 @@
  */
 package com.orientechnologies.orient.core.command;
 
-import com.orientechnologies.orient.core.serialization.OSerializableStream;
-
 /**
  * Generic GOF command pattern implementation. Execute a command passing the optional arguments "iArgs" and returns an Object.
  * 
@@ -24,6 +22,21 @@ import com.orientechnologies.orient.core.serialization.OSerializableStream;
  * 
  * @param <T>
  */
-public interface OCommandRequest extends OSerializableStream {
+public interface OCommandRequest {
 	public <RET> RET execute(Object... iArgs);
+
+	/**
+	 * Returns the limit of result set. -1 means no limits.
+	 * 
+	 */
+	public int getLimit();
+
+	/**
+	 * Sets the maximum items the command can returns. -1 means no limits.
+	 * 
+	 * @param iLimit
+	 *          -1 = no limit. 1 to N to limit the result set.
+	 * @return
+	 */
+	public OCommandRequest setLimit(final int iLimit);
 }

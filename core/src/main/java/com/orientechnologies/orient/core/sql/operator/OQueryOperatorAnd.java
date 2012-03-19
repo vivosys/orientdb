@@ -15,6 +15,9 @@
  */
 package com.orientechnologies.orient.core.sql.operator;
 
+import com.orientechnologies.orient.core.command.OCommandContext;
+import com.orientechnologies.orient.core.db.record.OIdentifiable;
+import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.sql.filter.OSQLFilterCondition;
 
 /**
@@ -26,12 +29,71 @@ import com.orientechnologies.orient.core.sql.filter.OSQLFilterCondition;
 public class OQueryOperatorAnd extends OQueryOperator {
 
 	public OQueryOperatorAnd() {
-		super("AND", 7, true);
+		super("AND", 4, false);
 	}
 
-	public boolean evaluate(final OSQLFilterCondition iCondition, final Object iLeft, final Object iRight) {
+	@Override
+	public Object evaluateRecord(final OIdentifiable iRecord, final OSQLFilterCondition iCondition, final Object iLeft,
+			final Object iRight, OCommandContext iContext) {
 		if (iLeft == null)
 			return false;
 		return (Boolean) iLeft && (Boolean) iRight;
+	}
+
+	@Override
+	public OIndexReuseType getIndexReuseType(final Object iLeft, final Object iRight) {
+		if (iLeft == null || iRight == null)
+			return OIndexReuseType.NO_INDEX;
+		return OIndexReuseType.INDEX_INTERSECTION;
+	}
+
+	@Override
+	public ORID getBeginRidRange(final Object iLeft, final Object iRight) {
+		final ORID leftRange;
+		final ORID rightRange;
+
+		if (iLeft instanceof OSQLFilterCondition)
+			leftRange = ((OSQLFilterCondition) iLeft).getBeginRidRange();
+		else
+			leftRange = null;
+
+		if (iRight instanceof OSQLFilterCondition)
+			rightRange = ((OSQLFilterCondition) iRight).getBeginRidRange();
+		else
+			rightRange = null;
+
+		if (leftRange == null && rightRange == null)
+			return null;
+		else if (leftRange == null)
+			return rightRange;
+		else if (rightRange == null)
+			return leftRange;
+		else
+			return leftRange.compareTo(rightRange) <= 0 ? rightRange : leftRange;
+	}
+
+	@Override
+	public ORID getEndRidRange(final Object iLeft, final Object iRight) {
+		final ORID leftRange;
+		final ORID rightRange;
+
+		if (iLeft instanceof OSQLFilterCondition)
+			leftRange = ((OSQLFilterCondition) iLeft).getEndRidRange();
+		else
+			leftRange = null;
+
+		if (iRight instanceof OSQLFilterCondition)
+			rightRange = ((OSQLFilterCondition) iRight).getEndRidRange();
+		else
+			rightRange = null;
+
+		if (leftRange == null && rightRange == null)
+			return null;
+		else if (leftRange == null)
+			return rightRange;
+		else if (rightRange == null)
+			return leftRange;
+		else
+			return leftRange.compareTo(rightRange) >= 0 ? rightRange : leftRange;
 	}
 }

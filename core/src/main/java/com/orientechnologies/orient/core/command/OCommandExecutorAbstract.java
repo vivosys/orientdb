@@ -15,8 +15,10 @@
  */
 package com.orientechnologies.orient.core.command;
 
-import com.orientechnologies.orient.core.db.ODatabase;
-import com.orientechnologies.orient.core.db.ODatabaseComplex;
+import java.util.Map;
+
+import com.orientechnologies.common.listener.OProgressListener;
+import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
 import com.orientechnologies.orient.core.db.record.ODatabaseRecord;
 
 /**
@@ -25,34 +27,50 @@ import com.orientechnologies.orient.core.db.record.ODatabaseRecord;
  * @author Luca Garulli
  * 
  */
-public abstract class OCommandExecutorAbstract implements OCommandExecutor {
-	protected String							text;
-	protected ODatabaseRecord<?>	database;
+@SuppressWarnings("unchecked")
+public abstract class OCommandExecutorAbstract extends OCommandToParse implements OCommandExecutor {
+	protected OProgressListener		progressListener;
+	protected int									limit	= -1;
+	protected Map<Object, Object>	parameters;
+	protected OCommandContext			context;
 
-	public OCommandExecutorAbstract init(final ODatabaseRecord<?> iDatabase, final String iText) {
-		database = iDatabase;
+	public OCommandExecutorAbstract init(final String iText) {
 		text = iText;
 		return this;
-	}
-
-	/**
-	 * Parse every time the request and execute it.
-	 */
-	public Object execute(final OCommandRequestInternal iRequest, final Object... iArgs) {
-		parse(iRequest);
-		return execute(iArgs);
-	}
-
-	public String getText() {
-		return text;
-	}
-
-	public ODatabase getDatabase() {
-		return database;
 	}
 
 	@Override
 	public String toString() {
 		return getClass().getSimpleName() + " [text=" + text + "]";
+	}
+
+	public OProgressListener getProgressListener() {
+		return progressListener;
+	}
+
+	public <RET extends OCommandExecutor> RET setProgressListener(OProgressListener progressListener) {
+		this.progressListener = progressListener;
+		return (RET) this;
+	}
+
+	public int getLimit() {
+		return limit;
+	}
+
+	public <RET extends OCommandExecutor> RET setLimit(final int iLimit) {
+		this.limit = iLimit;
+		return (RET) this;
+	}
+
+	public Map<Object, Object> getParameters() {
+		return parameters;
+	}
+
+	public OCommandContext getContext() {
+		return context;
+	}
+
+	public static ODatabaseRecord getDatabase() {
+		return ODatabaseRecordThreadLocal.INSTANCE.get();
 	}
 }

@@ -15,6 +15,8 @@
  */
 package com.orientechnologies.common.concur.resource;
 
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Semaphore;
@@ -25,27 +27,43 @@ import com.orientechnologies.common.concur.lock.OLockException;
 public class OResourcePool<K, V> {
 	private final Semaphore							sem;
 	private final Queue<V>							resources	= new ConcurrentLinkedQueue<V>();
+	private final Collection<V>					unmodifiableresources;
 	private OResourcePoolListener<K, V>	listener;
 
 	public OResourcePool(final int iMaxResources, final OResourcePoolListener<K, V> iListener) {
 		listener = iListener;
-		sem = new Semaphore(iMaxResources, true);
+		sem = new Semaphore(iMaxResources + 1, true);
+		unmodifiableresources = Collections.unmodifiableCollection(resources);
 	}
 
-	public V getResource(K iKey, final long iMaxWaitMillis) throws InterruptedException, OLockException {
+	public V getResource(K iKey, final long iMaxWaitMillis, Object... iAdditionalArgs) throws OLockException {
 
 		// First, get permission to take or create a resource
-		if (!sem.tryAcquire(iMaxWaitMillis, TimeUnit.MILLISECONDS))
-			throw new OLockException("Can't acquire lock on requested resource: " + iKey);
-
-		// Then, actually take one if available...
-		V res = resources.poll();
-		if (res != null)
-			return res;
-
-		// ...or create one if none available
 		try {
-			res = listener.createNewResource(iKey);
+			if (!sem.tryAcquire(iMaxWaitMillis, TimeUnit.MILLISECONDS))
+				throw new OLockException("Cannot acquire lock on requested resource: " + iKey);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new OLockException("Cannot acquire lock on requested resource: " + iKey, e);
+		}
+
+		V res;
+		do {
+			// POP A RESOURCE
+			res = resources.poll();
+			if (res != null) {
+				// TRY TO REUSE IT
+				if (listener.reuseResource(iKey, iAdditionalArgs, res))
+					// OK: REUSE IT
+					return res;
+
+				// UNABLE TO REUSE IT: THE RESOURE WILL BE DISCARDED AND TRY WITH THE NEXT ONE, IF ANY
+			}
+		} while (!resources.isEmpty());
+
+		// NO AVAILABLE RESOURCES: CREATE A NEW ONE
+		try {
+			res = listener.createNewResource(iKey, iAdditionalArgs);
 			return res;
 		} catch (Exception e) {
 			// Don't hog the permit if we failed to create a resource!
@@ -57,5 +75,13 @@ public class OResourcePool<K, V> {
 	public void returnResource(final V res) {
 		resources.add(res);
 		sem.release();
+	}
+
+	public Collection<V> getResources() {
+		return unmodifiableresources;
+	}
+
+	public void close() {
+		sem.drainPermits();
 	}
 }

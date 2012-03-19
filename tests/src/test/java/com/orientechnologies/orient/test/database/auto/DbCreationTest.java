@@ -16,38 +16,181 @@
 package com.orientechnologies.orient.test.database.auto;
 
 import java.io.IOException;
+import java.util.Locale;
 
+import org.testng.Assert;
 import org.testng.annotations.Parameters;
 import org.testng.annotations.Test;
 
-import com.orientechnologies.orient.client.admin.OServerAdmin;
+import com.orientechnologies.common.profiler.OProfiler;
+import com.orientechnologies.orient.client.db.ODatabaseHelper;
 import com.orientechnologies.orient.client.remote.OEngineRemote;
-import com.orientechnologies.orient.core.db.record.ODatabaseFlat;
+import com.orientechnologies.orient.core.config.OGlobalConfiguration;
+import com.orientechnologies.orient.core.db.document.ODatabaseDocument;
+import com.orientechnologies.orient.core.db.document.ODatabaseDocumentPool;
+import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
+import com.orientechnologies.orient.core.db.object.ODatabaseObjectTx;
+import com.orientechnologies.orient.core.engine.memory.OEngineMemory;
+import com.orientechnologies.orient.core.exception.OStorageException;
+import com.orientechnologies.orient.core.metadata.security.ORole;
+import com.orientechnologies.orient.core.sql.query.OSQLSynchQuery;
 
 @Test(groups = "db")
 public class DbCreationTest {
-	private String				url;
-	private ODatabaseFlat	database;
+	private String						url;
+	private ODatabaseObjectTx	database;
 
 	@Parameters(value = "url")
 	public DbCreationTest(String iURL) {
 		url = iURL;
+		OProfiler.getInstance().startRecording();
 	}
 
-	public void testDbCreation() throws IOException {
-		if (url.startsWith(OEngineRemote.NAME))
-			new OServerAdmin(url).connect().createDatabase("local").close();
-		else {
-			database = new ODatabaseFlat(url);
-			database.create();
-			database.close();
+	public void testDbCreationNoSecurity() throws IOException {
+		if (url.startsWith(OEngineMemory.NAME))
+			OGlobalConfiguration.STORAGE_KEEP_OPEN.setValue(true);
+
+		if (!url.startsWith(OEngineRemote.NAME)) {
+			database = new ODatabaseObjectTx(url);
+			database.setProperty("security", Boolean.FALSE);
+
+			ODatabaseHelper.dropDatabase(database, "server");
+			ODatabaseHelper.createDatabase(database, url);
+			ODatabaseHelper.dropDatabase(database, "server");
 		}
 	}
 
-	@Test(dependsOnMethods = { "testDbCreation" })
+	@Test(dependsOnMethods = { "testDbCreationNoSecurity" })
+	public void testDbCreationDefault() throws IOException {
+		if (url.startsWith(OEngineMemory.NAME))
+			OGlobalConfiguration.STORAGE_KEEP_OPEN.setValue(true);
+
+		ODatabaseHelper.createDatabase(new ODatabaseObjectTx(url), url);
+	}
+
+	@Test(dependsOnMethods = { "testDbCreationDefault" })
+	public void testDbExists() throws IOException {
+		Assert.assertTrue(ODatabaseHelper.existsDatabase(new ODatabaseDocumentTx(url)));
+	}
+
+	@Test(dependsOnMethods = { "testDbExists" })
 	public void testDbOpen() {
-		database = new ODatabaseFlat(url);
+		database = new ODatabaseObjectTx(url);
 		database.open("admin", "admin");
 		database.close();
 	}
+
+	@Test(dependsOnMethods = { "testDbOpen" })
+	public void testDbOpenWithLastAsSlash() {
+		database = new ODatabaseObjectTx(url + "/");
+		database.open("admin", "admin");
+		database.close();
+	}
+
+	@Test(dependsOnMethods = { "testDbOpenWithLastAsSlash" })
+	public void testDbOpenWithBackSlash() {
+		database = new ODatabaseObjectTx(url.replace('/', '\\'));
+		database.open("admin", "admin");
+		database.close();
+	}
+
+	@Test(dependsOnMethods = { "testDbOpenWithBackSlash" })
+	public void testChangeLocale() throws IOException {
+		database = new ODatabaseObjectTx(url);
+		database.open("admin", "admin");
+		database.getStorage().getConfiguration().localeLanguage = Locale.ENGLISH.getLanguage();
+		database.getStorage().getConfiguration().localeCountry = Locale.ENGLISH.getCountry();
+		database.getStorage().getConfiguration().update();
+		database.close();
+	}
+
+	@Test(dependsOnMethods = { "testChangeLocale" })
+	public void testRoles() throws IOException {
+		database = new ODatabaseObjectTx(url);
+		database.open("admin", "admin");
+		database.query(new OSQLSynchQuery<ORole>("select from ORole where name = 'admin'"));
+		database.close();
+	}
+
+	@Test(dependsOnMethods = { "testChangeLocale" })
+	public void testSubFolderDbCreate() throws IOException {
+		int pos = url.lastIndexOf("/");
+		String u = url;
+
+		if (pos > -1)
+			u = url.substring(0, pos) + "/sub/subTest";
+		else {
+			pos = url.lastIndexOf(":");
+			u = url.substring(0, pos + 1) + "sub/subTest";
+		}
+
+		ODatabaseDocumentTx db = new ODatabaseDocumentTx(u);
+
+		try {
+			ODatabaseHelper.dropDatabase(db);
+		} catch (OStorageException e) {
+			Assert.assertTrue(e.getCause().getMessage().equals("Database with name 'sub/subTest' doesn't exits."));
+		}
+		ODatabaseHelper.createDatabase(db, u);
+		db.open("admin", "admin");
+		db.close();
+
+		ODatabaseHelper.dropDatabase(db);
+	}
+
+	@Test(dependsOnMethods = { "testChangeLocale" })
+	public void testSubFolderDbCreateConnPool() throws IOException {
+		int pos = url.lastIndexOf("/");
+		String u = url;
+
+		if (pos > -1)
+			u = url.substring(0, pos) + "/sub/subTest";
+		else {
+			pos = url.lastIndexOf(":");
+			u = url.substring(0, pos + 1) + "sub/subTest";
+		}
+
+		ODatabaseDocumentTx db = new ODatabaseDocumentTx(u);
+
+		try {
+			ODatabaseHelper.dropDatabase(db);
+		} catch (OStorageException e) {
+			Assert.assertTrue(e.getCause().getMessage().equals("Database with name 'sub/subTest' doesn't exits."));
+		}
+		ODatabaseHelper.createDatabase(db, u);
+
+		db = ODatabaseDocumentPool.global().acquire(u, "admin", "admin");
+		db.close();
+
+		ODatabaseHelper.dropDatabase(db);
+	}
+
+	@Test
+	public void testCreateAndConnectionPool() throws IOException {
+		ODatabaseDocument db = new ODatabaseDocumentTx(url);
+		try {
+			ODatabaseHelper.dropDatabase(db);
+		} catch (OStorageException e) {
+			Assert.assertTrue(e.getCause().getMessage().startsWith("Database with name '"));
+			Assert.assertTrue(e.getCause().getMessage().endsWith("'doesn't exits."));
+		}
+		ODatabaseHelper.createDatabase(db, url);
+		db.close();
+		// Get connection from pool
+		db = ODatabaseDocumentPool.global().acquire(url, "admin", "admin");
+		db.close();
+
+		// Destroy db in the back of the pool
+		db = new ODatabaseDocumentTx(url);
+		ODatabaseHelper.dropDatabase(db);
+
+		// Re-create it so that the db exists for the pool
+		db = new ODatabaseDocumentTx(url);
+		ODatabaseHelper.createDatabase(db, url);
+		db.close();
+
+		db = ODatabaseDocumentPool.global().acquire(url, "admin", "admin");
+		db.close();
+	}
+
 }

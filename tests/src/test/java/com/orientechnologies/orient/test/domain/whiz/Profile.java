@@ -18,16 +18,24 @@ package com.orientechnologies.orient.test.domain.whiz;
 import java.util.HashSet;
 import java.util.Set;
 
+import com.orientechnologies.orient.core.annotation.OId;
+import com.orientechnologies.orient.core.annotation.OVersion;
 import com.orientechnologies.orient.test.domain.business.Address;
 
 public class Profile {
+	@OId
+	private String				id;
+	@OVersion
+	private Integer				version;
 	private String				nick;
 	private Set<Profile>	followings	= new HashSet<Profile>();
 	private Set<Profile>	followers		= new HashSet<Profile>();
 	private String				name;
 	private String				surname;
 	private Address				location;
+	private Long					hash;
 	private Profile				invitedBy;
+	private String				value;
 
 	public Profile() {
 	}
@@ -117,5 +125,27 @@ public class Profile {
 
 	public void setNick(String nick) {
 		this.nick = nick;
+	}
+
+	public String getValue() {
+		return value;
+	}
+
+	public Profile setValue(String value) {
+		this.value = value;
+		return this;
+	}
+
+	public String getId() {
+		return id;
+	}
+
+	public Long getHash() {
+		return hash;
+	}
+
+	public Profile setHash(Long hash) {
+		this.hash = hash;
+		return this;
 	}
 }

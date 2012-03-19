@@ -16,34 +16,71 @@
 package com.orientechnologies.orient.server.network;
 
 import java.io.IOException;
+import java.lang.reflect.Constructor;
 import java.net.BindException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
 
 import com.orientechnologies.common.log.OLogManager;
-import com.orientechnologies.orient.enterprise.channel.binary.OChannelBinary;
-import com.orientechnologies.orient.server.OClientConnection;
-import com.orientechnologies.orient.server.OClientConnectionManager;
+import com.orientechnologies.orient.core.Orient;
+import com.orientechnologies.orient.core.config.OContextConfiguration;
+import com.orientechnologies.orient.core.config.OGlobalConfiguration;
+import com.orientechnologies.orient.core.serialization.serializer.OStringSerializerHelper;
+import com.orientechnologies.orient.server.OServer;
+import com.orientechnologies.orient.server.config.OServerCommandConfiguration;
+import com.orientechnologies.orient.server.config.OServerParameterConfiguration;
 import com.orientechnologies.orient.server.network.protocol.ONetworkProtocol;
+import com.orientechnologies.orient.server.network.protocol.http.command.OServerCommand;
 
 public class OServerNetworkListener extends Thread {
 	private ServerSocket											serverSocket;
 	private InetSocketAddress									inboundAddr;
 	private Class<? extends ONetworkProtocol>	protocolType;
-	private volatile int											connectionSerial	= 0;
-	private volatile boolean									active						= true;
+	private volatile boolean									active	= true;
+	private OServerCommand[]									commands;
+	private int																socketBufferSize;
+	private OContextConfiguration							configuration;
+	private OServer														server;
 
-	public OServerNetworkListener(final String iHostName, final String iHostPortRange, final String iProtocolName,
-			final Class<? extends ONetworkProtocol> iProtocol) {
+	@SuppressWarnings("unchecked")
+	public OServerNetworkListener(final OServer iServer, final String iHostName, final String iHostPortRange,
+			final String iProtocolName, final Class<? extends ONetworkProtocol> iProtocol,
+			final OServerParameterConfiguration[] iParameters, final OServerCommandConfiguration[] iCommands) {
+		super(Orient.getThreadGroup(), "OrientDB " + iProtocol.getSimpleName() + " (" + iHostName + ":" + iHostPortRange + ")");
+		server = iServer;
+
 		listen(iHostName, iHostPortRange, iProtocolName);
 		protocolType = iProtocol;
+
+		readParameters(iServer.getContextConfiguration(), iParameters);
+
+		if (iCommands != null) {
+			// CREATE COMMANDS
+			commands = new OServerCommand[iCommands.length];
+			Constructor<OServerCommand> c;
+			for (int i = 0; i < iCommands.length; ++i) {
+				try {
+					c = (Constructor<OServerCommand>) Class.forName(iCommands[i].implementation).getConstructor(
+							OServerCommandConfiguration.class);
+					commands[i] = c.newInstance(new Object[] { iCommands[i] });
+				} catch (Exception e) {
+					throw new IllegalArgumentException("Cannot create custom command '" + iCommands[i] + "'", e);
+				}
+			}
+		}
 		start();
 	}
 
 	public void shutdown() {
 		this.active = false;
+		if (serverSocket != null)
+			try {
+				serverSocket.close();
+			} catch (IOException e) {
+			}
 	}
 
 	/**
@@ -53,35 +90,15 @@ public class OServerNetworkListener extends Thread {
 	 * @param iHostName
 	 */
 	private void listen(final String iHostName, final String iHostPortRange, final String iProtocolName) {
-		int[] ports;
-
-		if (iHostPortRange.contains(",")) {
-			// MULTIPLE ENUMERATED PORTS
-			String[] portValues = iHostPortRange.split(",");
-			ports = new int[portValues.length];
-			for (int i = 0; i < portValues.length; ++i)
-				ports[i] = Integer.parseInt(portValues[i]);
-
-		} else if (iHostPortRange.contains("-")) {
-			// MULTIPLE RANGE PORTS
-			String[] limits = iHostPortRange.split("-");
-			int lowerLimit = Integer.parseInt(limits[0]);
-			int upperLimit = Integer.parseInt(limits[1]);
-			ports = new int[upperLimit - lowerLimit + 1];
-			for (int i = 0; i < upperLimit - lowerLimit + 1; ++i)
-				ports[i] = lowerLimit + i;
-
-		} else
-			// SINGLE PORT SPECIFIED
-			ports = new int[] { Integer.parseInt(iHostPortRange) };
+		int[] ports = getPorts(iHostPortRange);
 
 		for (int port : ports) {
 			inboundAddr = new InetSocketAddress(iHostName, port);
 			try {
-				serverSocket = new java.net.ServerSocket(port);
+				serverSocket = new java.net.ServerSocket(port, 0, InetAddress.getByName(iHostName));
 
 				if (serverSocket.isBound()) {
-					OLogManager.instance().config(this,
+					OLogManager.instance().info(this,
 							"Listening " + iProtocolName + " connections on " + inboundAddr.getHostName() + ":" + inboundAddr.getPort());
 					return;
 				}
@@ -97,8 +114,8 @@ public class OServerNetworkListener extends Thread {
 			}
 		}
 
-		OLogManager.instance().error(this, "Unable to listen connection using the configured ports '%s' on host '%s'", iHostPortRange,
-				iHostName);
+		OLogManager.instance().error(this, "Unable to listen for connections using the configured ports '%s' on host '%s'",
+				iHostPortRange, iHostName);
 		System.exit(1);
 	}
 
@@ -106,34 +123,35 @@ public class OServerNetworkListener extends Thread {
 		return active;
 	}
 
+	@Override
 	public void run() {
 		ONetworkProtocol protocol;
-		OClientConnection connection;
 
 		try {
 			while (active) {
 				try {
 					// listen for and accept a client connection to serverSocket
-					Socket socket = serverSocket.accept();
+					final Socket socket = serverSocket.accept();
 
 					socket.setPerformancePreferences(0, 2, 1);
-					socket.setSendBufferSize(OChannelBinary.DEFAULT_BUFFER_SIZE);
-					socket.setReceiveBufferSize(OChannelBinary.DEFAULT_BUFFER_SIZE);
+					socket.setSendBufferSize(socketBufferSize);
+					socket.setReceiveBufferSize(socketBufferSize);
 
 					// CREATE A NEW PROTOCOL INSTANCE
 					protocol = protocolType.newInstance();
 
-					// CTEARE THE CLIENT CONNECTION
-					connection = new OClientConnection(connectionSerial++, socket, protocol);
-
 					// CONFIGURE THE PROTOCOL FOR THE INCOMING CONNECTION
-					protocol.config(socket, connection);
+					protocol.config(server, socket, configuration);
 
-					// EXECUTE THE CONNECTION
-					OClientConnectionManager.instance().connect(socket, connection);
+					if (commands != null)
+						// REGISTER ADDITIONAL COMMANDS
+						for (OServerCommand c : commands) {
+							protocol.registerCommand(c);
+						}
 
 				} catch (Throwable e) {
-					OLogManager.instance().error(this, "Error on client connection", e);
+					if (active)
+						OLogManager.instance().error(this, "Error on client connection", e);
 				} finally {
 				}
 			}
@@ -144,5 +162,64 @@ public class OServerNetworkListener extends Thread {
 			} catch (IOException ioe) {
 			}
 		}
+	}
+
+	public Class<? extends ONetworkProtocol> getProtocolType() {
+		return protocolType;
+	}
+
+	public InetSocketAddress getInboundAddr() {
+		return inboundAddr;
+	}
+
+	/**
+	 * Initializes connection parameters by the reading XML configuration. If not specified, get the parameters defined as global
+	 * configuration.
+	 * 
+	 * @param iServerConfig
+	 */
+	private void readParameters(final OContextConfiguration iServerConfig, final OServerParameterConfiguration[] iParameters) {
+		configuration = new OContextConfiguration(iServerConfig);
+
+		// SET PARAMETERS
+		if (iParameters != null && iParameters.length > 0) {
+			// CONVERT PARAMETERS IN MAP TO INTIALIZE THE CONTEXT-CONFIGURATION
+			for (OServerParameterConfiguration param : iParameters)
+				configuration.setValue(param.name, param.value);
+		}
+
+		socketBufferSize = configuration.getValueAsInteger(OGlobalConfiguration.NETWORK_SOCKET_BUFFER_SIZE);
+	}
+
+	public static int[] getPorts(final String iHostPortRange) {
+		int[] ports;
+
+		if (OStringSerializerHelper.contains(iHostPortRange, ',')) {
+			// MULTIPLE ENUMERATED PORTS
+			String[] portValues = iHostPortRange.split(",");
+			ports = new int[portValues.length];
+			for (int i = 0; i < portValues.length; ++i)
+				ports[i] = Integer.parseInt(portValues[i]);
+
+		} else if (OStringSerializerHelper.contains(iHostPortRange, '-')) {
+			// MULTIPLE RANGE PORTS
+			String[] limits = iHostPortRange.split("-");
+			int lowerLimit = Integer.parseInt(limits[0]);
+			int upperLimit = Integer.parseInt(limits[1]);
+			ports = new int[upperLimit - lowerLimit + 1];
+			for (int i = 0; i < upperLimit - lowerLimit + 1; ++i)
+				ports[i] = lowerLimit + i;
+
+		} else
+			// SINGLE PORT SPECIFIED
+			ports = new int[] { Integer.parseInt(iHostPortRange) };
+		return ports;
+	}
+
+	@Override
+	public String toString() {
+		StringBuilder builder = new StringBuilder();
+		builder.append(protocolType.getSimpleName()).append(" ").append(serverSocket.getLocalSocketAddress()).append(":");
+		return builder.toString();
 	}
 }

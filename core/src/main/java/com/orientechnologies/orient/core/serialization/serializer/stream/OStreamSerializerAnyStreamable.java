@@ -19,9 +19,12 @@ import java.io.IOException;
 import java.util.Arrays;
 
 import com.orientechnologies.common.log.OLogManager;
+import com.orientechnologies.common.util.OArrays;
 import com.orientechnologies.orient.core.exception.OSerializationException;
 import com.orientechnologies.orient.core.serialization.OBinaryProtocol;
 import com.orientechnologies.orient.core.serialization.OSerializableStream;
+import com.orientechnologies.orient.core.sql.OCommandSQL;
+import com.orientechnologies.orient.core.sql.query.OSQLSynchQuery;
 
 public class OStreamSerializerAnyStreamable implements OStreamSerializer {
 	public static final OStreamSerializerAnyStreamable	INSTANCE	= new OStreamSerializerAnyStreamable();
@@ -30,24 +33,32 @@ public class OStreamSerializerAnyStreamable implements OStreamSerializer {
 	/**
 	 * Re-Create any object if the class has a public constructor that accepts a String as unique parameter.
 	 */
-	public Object fromStream(byte[] iStream) throws IOException {
+	public Object fromStream(final byte[] iStream) throws IOException {
 		if (iStream == null || iStream.length == 0)
 			// NULL VALUE
 			return null;
 
 		final int classNameSize = OBinaryProtocol.bytes2int(iStream);
 		if (classNameSize <= 0)
-			OLogManager.instance().error(this, "Class signature not found in ANY element: " + iStream, OSerializationException.class);
+			OLogManager.instance().error(this, "Class signature not found in ANY element: " + Arrays.toString(iStream),
+					OSerializationException.class);
 
 		final String className = OBinaryProtocol.bytes2string(iStream, 4, classNameSize);
 
 		try {
-			Class<?> clazz = Class.forName(className);
+			final OSerializableStream stream;
+			// CHECK FOR ALIASES
+			if (className.equalsIgnoreCase("q"))
+				// QUERY
+				stream = new OSQLSynchQuery<Object>();
+			else if (className.equalsIgnoreCase("c"))
+				// SQL COMMAND
+				stream = new OCommandSQL();
+			else
+				// CREATE THE OBJECT BY INVOKING THE EMPTY CONSTRUCTOR
+				stream = (OSerializableStream) Class.forName(className).newInstance();
 
-			// CREATE THE OBJECT BY INVOKING THE EMPTY CONSTRUCTOR
-			OSerializableStream stream = (OSerializableStream) clazz.newInstance();
-
-			return stream.fromStream(Arrays.copyOfRange(iStream, 4 + classNameSize, iStream.length));
+			return stream.fromStream(OArrays.copyOfRange(iStream, 4 + classNameSize, iStream.length));
 
 		} catch (Exception e) {
 			OLogManager.instance().error(this, "Error on unmarshalling content. Class: " + className, e, OSerializationException.class);
@@ -58,16 +69,20 @@ public class OStreamSerializerAnyStreamable implements OStreamSerializer {
 	/**
 	 * Serialize the class name size + class name + object content
 	 */
-	public byte[] toStream(Object iObject) throws IOException {
+	public byte[] toStream(final Object iObject) throws IOException {
 		if (iObject == null)
 			return null;
 
+		if (!(iObject instanceof OSerializableStream))
+			throw new OSerializationException("Cannot serialize the object [" + iObject.getClass() + ":" + iObject
+					+ "] since it does not implement the OSerializableStream interface");
+
 		OSerializableStream stream = (OSerializableStream) iObject;
 
-		if (!(iObject instanceof OSerializableStream))
-			throw new OSerializationException("Can't serialize the object since it's not implements the OSerializableStream interface");
-
+		// SERIALIZE THE CLASS NAME
 		byte[] className = OBinaryProtocol.string2bytes(iObject.getClass().getName());
+
+		// SERIALIZE THE OBJECT CONTENT
 		byte[] objectContent = stream.toStream();
 
 		byte[] result = new byte[4 + className.length + objectContent.length];

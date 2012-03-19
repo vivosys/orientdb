@@ -19,22 +19,23 @@ public class OStorageDataConfiguration extends OStorageSegmentConfiguration {
 
 	public OStorageDataHoleConfiguration	holeFile;
 
-	private static final String						START_SIZE			= "10Mb";
+	private static final String						START_SIZE			= "1Mb";
 	private static final String						INCREMENT_SIZE	= "100%";
 
-	public OStorageDataConfiguration() {
-		fileStartSize = START_SIZE;
-		fileIncrementSize = INCREMENT_SIZE;
-	}
-
-	public OStorageDataConfiguration(OStorageConfiguration iRoot, String iSegmentName) {
+	public OStorageDataConfiguration(final OStorageConfiguration iRoot, final String iSegmentName) {
 		super(iRoot, iSegmentName);
 		fileStartSize = START_SIZE;
 		fileIncrementSize = INCREMENT_SIZE;
 	}
 
+	public OStorageDataConfiguration(final String iSegmentName) {
+		super(iSegmentName);
+		fileStartSize = START_SIZE;
+		fileIncrementSize = INCREMENT_SIZE;
+	}
+
 	@Override
-	public void setRoot(OStorageConfiguration root) {
+	public void setRoot(final OStorageConfiguration root) {
 		super.setRoot(root);
 		holeFile.parent = this;
 	}

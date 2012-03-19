@@ -20,20 +20,24 @@ import javax.xml.bind.annotation.XmlRootElement;
 import javax.xml.bind.annotation.XmlType;
 
 @XmlRootElement(name = "storage")
-@XmlType(propOrder = { "name", "path" })
+@XmlType(propOrder = { "loadOnStartup", "userPassword", "userName", "path", "name" })
 public class OServerStorageConfiguration {
 
-	@XmlAttribute
-	public String	name;
+	@XmlAttribute(required = true)
+	public String		name;
 
 	@XmlAttribute
-	public String	path;
+	public String		path;
+
+	@XmlAttribute
+	public String		userName;
+
+	@XmlAttribute
+	public String		userPassword;
+
+	@XmlAttribute(name = "loaded-at-startup")
+	public boolean	loadOnStartup;
 
 	public OServerStorageConfiguration() {
-	}
-
-	public OServerStorageConfiguration(final String iName, final String iPath) {
-		name = iName;
-		path = iPath;
 	}
 }

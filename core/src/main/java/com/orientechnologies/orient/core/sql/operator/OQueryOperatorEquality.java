@@ -15,6 +15,8 @@
  */
 package com.orientechnologies.orient.core.sql.operator;
 
+import com.orientechnologies.orient.core.command.OCommandContext;
+import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.query.OQueryRuntimeValueMulti;
 import com.orientechnologies.orient.core.sql.filter.OSQLFilterCondition;
 import com.orientechnologies.orient.core.sql.filter.OSQLFilterItemFieldAll;
@@ -27,56 +29,64 @@ import com.orientechnologies.orient.core.sql.filter.OSQLFilterItemFieldAll;
  */
 public abstract class OQueryOperatorEquality extends OQueryOperator {
 
-	protected OQueryOperatorEquality(String iKeyword, int iPrecedence, boolean iLogical) {
-		super(iKeyword, iPrecedence, iLogical);
+	protected OQueryOperatorEquality(final String iKeyword, final int iPrecedence, final boolean iLogical) {
+		super(iKeyword, iPrecedence, false);
 	}
 
-	protected abstract boolean evaluateExpression(final OSQLFilterCondition iCondition, final Object iLeft, final Object iRight);
+	protected OQueryOperatorEquality(final String iKeyword, final int iPrecedence, final boolean iLogical,
+			final int iExpectedRightWords) {
+		super(iKeyword, iPrecedence, false, iExpectedRightWords);
+	}
 
-	public boolean evaluate(final OSQLFilterCondition iCondition, final Object iLeft, final Object iRight) {
+	protected abstract boolean evaluateExpression(final OIdentifiable iRecord, final OSQLFilterCondition iCondition,
+			final Object iLeft, final Object iRight, OCommandContext iContext);
+
+	@Override
+	public Object evaluateRecord(final OIdentifiable iRecord, final OSQLFilterCondition iCondition, final Object iLeft,
+			final Object iRight, OCommandContext iContext) {
 		if (iLeft instanceof OQueryRuntimeValueMulti) {
 			// LEFT = MULTI
-			OQueryRuntimeValueMulti left = (OQueryRuntimeValueMulti) iLeft;
+			final OQueryRuntimeValueMulti left = (OQueryRuntimeValueMulti) iLeft;
 
 			if (left.values.length == 0)
 				return false;
 
-			if (left.getDefinition().getName().equals(OSQLFilterItemFieldAll.NAME)) {
+			if (left.getDefinition().getRoot().equals(OSQLFilterItemFieldAll.NAME)) {
 				// ALL VALUES
-				for (Object v : left.values)
-					if (v == null || !evaluateExpression(iCondition, v, iRight))
+				for (final Object v : left.values)
+					if (v == null || !evaluateExpression(iRecord, iCondition, v, iRight, iContext))
 						return false;
 				return true;
 			} else {
 				// ANY VALUES
-				for (Object v : left.values)
-					if (v != null && evaluateExpression(iCondition, v, iRight))
+				for (final Object v : left.values)
+					if (v != null && evaluateExpression(iRecord, iCondition, v, iRight, iContext))
 						return true;
 				return false;
 			}
 
 		} else if (iRight instanceof OQueryRuntimeValueMulti) {
 			// RIGHT = MULTI
-			OQueryRuntimeValueMulti right = (OQueryRuntimeValueMulti) iRight;
+			final OQueryRuntimeValueMulti right = (OQueryRuntimeValueMulti) iRight;
 
 			if (right.values.length == 0)
 				return false;
 
-			if (right.getDefinition().getName().equals(OSQLFilterItemFieldAll.NAME)) {
+			if (right.getDefinition().getRoot().equals(OSQLFilterItemFieldAll.NAME)) {
 				// ALL VALUES
-				for (Object v : right.values)
-					if (v == null || !evaluateExpression(iCondition, iLeft, v))
+				for (final Object v : right.values)
+					if (v == null || !evaluateExpression(iRecord, iCondition, iLeft, v, iContext))
 						return false;
 				return true;
 			} else {
 				// ANY VALUES
-				for (Object v : right.values)
-					if (v != null && evaluateExpression(iCondition, iLeft, v))
+				for (final Object v : right.values)
+					if (v != null && evaluateExpression(iRecord, iCondition, iLeft, v, iContext))
 						return true;
 				return false;
 			}
 		} else
 			// SINGLE SIMPLE ITEM
-			return evaluateExpression(iCondition, iLeft, iRight);
+			return evaluateExpression(iRecord, iCondition, iLeft, iRight, iContext);
 	}
 }

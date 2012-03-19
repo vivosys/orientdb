@@ -18,34 +18,94 @@ package com.orientechnologies.orient.core.storage.impl.memory;
 import java.util.ArrayList;
 import java.util.List;
 
-public class ODataSegmentMemory {
-	private List<byte[]>	entries	= new ArrayList<byte[]>();
+import com.orientechnologies.common.concur.resource.OSharedResourceAbstract;
+
+public class ODataSegmentMemory extends OSharedResourceAbstract {
+	private final List<byte[]>	entries	= new ArrayList<byte[]>();
 
 	public ODataSegmentMemory() {
 	}
 
 	public void close() {
-		entries.clear();
+		acquireExclusiveLock();
+		try {
+
+			entries.clear();
+
+		} finally {
+			releaseExclusiveLock();
+		}
 	}
 
-	public int size() {
-		return entries.size();
+	public int count() {
+		acquireSharedLock();
+		try {
+
+			return entries.size();
+
+		} finally {
+			releaseSharedLock();
+		}
+	}
+
+	public long getSize() {
+		acquireSharedLock();
+		try {
+
+			long size = 0;
+			for (byte[] e : entries)
+				if (e != null)
+					size += e.length;
+
+			return size;
+
+		} finally {
+			releaseSharedLock();
+		}
 	}
 
 	public long createRecord(byte[] iContent) {
-		entries.add(iContent);
-		return entries.size() - 1;
+		acquireExclusiveLock();
+		try {
+
+			entries.add(iContent);
+			return entries.size() - 1;
+
+		} finally {
+			releaseExclusiveLock();
+		}
 	}
 
 	public void deleteRecord(final long iRecordPosition) {
-		entries.set((int) iRecordPosition, null);
+		acquireExclusiveLock();
+		try {
+
+			entries.set((int) iRecordPosition, null);
+
+		} finally {
+			releaseExclusiveLock();
+		}
 	}
 
 	public byte[] readRecord(final long iRecordPosition) {
-		return entries.get((int) iRecordPosition);
+		acquireSharedLock();
+		try {
+
+			return entries.get((int) iRecordPosition);
+
+		} finally {
+			releaseSharedLock();
+		}
 	}
 
 	public void updateRecord(final long iRecordPosition, final byte[] iContent) {
-		entries.set((int) iRecordPosition, iContent);
+		acquireExclusiveLock();
+		try {
+
+			entries.set((int) iRecordPosition, iContent);
+
+		} finally {
+			releaseExclusiveLock();
+		}
 	}
 }

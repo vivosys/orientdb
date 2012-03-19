@@ -15,189 +15,268 @@
  */
 package com.orientechnologies.orient.core.metadata.schema;
 
-import java.util.Arrays;
+import java.io.IOException;
 import java.util.Collection;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.Iterator;
+import java.util.Set;
 
-import com.orientechnologies.orient.core.exception.OSchemaException;
-import com.orientechnologies.orient.core.record.ORecordPositional;
-import com.orientechnologies.orient.core.serialization.serializer.OStringSerializerHelper;
-import com.orientechnologies.orient.core.serialization.serializer.record.OSerializableRecordPositional;
+import com.orientechnologies.common.listener.OProgressListener;
+import com.orientechnologies.orient.core.index.OIndex;
 
-public class OClass implements OSerializableRecordPositional {
-	protected int											id;
-	protected OSchema									owner;
-	protected String									name;
-	protected Class<?>								javaClass;
-	protected int											fixedSize		= 0;
-	protected Map<String, OProperty>	properties	= new LinkedHashMap<String, OProperty>();
-	protected int[]										clusterIds;
-	protected int											defaultClusterId;
-
-	public OClass(OSchema iOwner, int iId, String iName, String iJavaClassName, int[] iClusterIds, int iDefaultClusterId)
-			throws ClassNotFoundException {
-		this(iOwner, iId, iName, iClusterIds, iDefaultClusterId);
-		javaClass = Class.forName(iJavaClassName);
+/**
+ * Schema class
+ * 
+ * @author Luca Garulli (l.garulli--at--orientechnologies.com)
+ * 
+ */
+public interface OClass extends Comparable<OClass> {
+	public static enum ATTRIBUTES {
+		NAME, SHORTNAME, SUPERCLASS, OVERSIZE, STRICTMODE
 	}
 
-	public OClass(OSchema iOwner, int iId, String iName, int[] iClusterIds, int iDefaultClusterId) {
-		id = iId;
-		owner = iOwner;
-		name = iName;
-		clusterIds = iClusterIds;
-		defaultClusterId = iDefaultClusterId;
+	public static enum INDEX_TYPE {
+		UNIQUE, NOTUNIQUE, FULLTEXT, DICTIONARY, PROXY
 	}
+
+	public <T> T newInstance() throws InstantiationException, IllegalAccessException;
+
+	public boolean isStrictMode();
+
+	public OClass setStrictMode(boolean iMode);
+
+	public OClass getSuperClass();
+
+	public OClass setSuperClass(OClass iSuperClass);
+
+	public String getName();
+
+	public String getStreamableName();
+
+	public Collection<OProperty> declaredProperties();
+
+	public Collection<OProperty> properties();
+
+	public Collection<OProperty> getIndexedProperties();
+
+	public OProperty getProperty(final String iPropertyName);
+
+	public OProperty createProperty(final String iPropertyName, final OType iType);
+
+	public OProperty createProperty(final String iPropertyName, final OType iType, final OClass iLinkedClass);
+
+	public OProperty createProperty(final String iPropertyName, final OType iType, final OType iLinkedType);
+
+	public void dropProperty(final String iPropertyName);
+
+	public boolean existsProperty(final String iPropertyName);
+
+	public Class<?> getJavaClass();
+
+	public int getDefaultClusterId();
+
+	public int[] getClusterIds();
+
+	public OClass addClusterId(final int iId);
+
+	public OClass removeClusterId(final int iId);
+
+	public int[] getPolymorphicClusterIds();
+
+	public Iterator<OClass> getBaseClasses();
 
 	/**
-	 * Constructor called for inline OClass instances.
+	 * Returns the oversize factor. Oversize is used to extend the record size by a factor to avoid defragmentation upon updates. 0 or
+	 * 1.0 means no oversize.
+	 * 
+	 * @return Oversize factor
+	 * @see #setOverSize(float)
+	 */
+	public float getOverSize();
+
+	/**
+	 * Sets the oversize factor. Oversize is used to extend the record size by a factor to avoid defragmentation upon updates. 0 or
+	 * 1.0 means no oversize. Default is 0.
+	 * 
+	 * @return Oversize factor
+	 * @see #getOverSize()
+	 */
+	public OClass setOverSize(final float overSize);
+
+	/**
+	 * Returns the number of the records of this class considering also subclasses (polymorphic).
+	 */
+	public long count();
+
+	/**
+	 * Returns the number of the records of this class and based on polymorphic parameter it consider or not the subclasses.
+	 */
+	public long count(final boolean iPolymorphic);
+
+	/**
+	 * Truncates all the clusters the class uses.
+	 * 
+	 * @throws IOException
+	 */
+	public void truncate() throws IOException;
+
+	/**
+	 * Tells if the current instance extends the passed schema class (iClass).
+	 * 
+	 * @param iClassName
+	 * @return true if the current instance extends the passed schema class (iClass).
+	 * @see #isSuperClassOf(OClass)
+	 */
+	public boolean isSubClassOf(final String iClassName);
+
+	/**
+	 * Returns true if the current instance extends the passed schema class (iClass).
 	 * 
 	 * @param iClass
+	 * @return
+	 * @see #isSuperClassOf(OClass)
 	 */
-	public OClass(Class<?> iClass) {
-		name = iClass.getSimpleName();
-	}
+	public boolean isSubClassOf(final OClass iClass);
 
-	@SuppressWarnings("unchecked")
-	public <T> T newInstance() throws InstantiationException, IllegalAccessException {
-		if (javaClass == null)
-			throw new IllegalArgumentException("Can't create an instance of class '" + name + "' since no Java class was specified");
+	/**
+	 * Returns true if the passed schema class (iClass) extends the current instance.
+	 * 
+	 * @param iClass
+	 * @return Returns true if the passed schema class extends the current instance
+	 * @see #isSubClassOf(OClass)
+	 */
+	public boolean isSuperClassOf(final OClass iClass);
 
-		return (T) javaClass.newInstance();
-	}
+	public String getShortName();
 
-	public String getName() {
-		return this.name;
-	}
+	public OClass setShortName(final String shortName);
 
-	public Collection<OProperty> properties() {
-		return Collections.unmodifiableCollection(properties.values());
-	}
+	public Object get(ATTRIBUTES iAttribute);
 
-	public OProperty getProperty(String iPropertyName) {
-		return properties.get(iPropertyName.toLowerCase());
-	}
+	public OClass set(ATTRIBUTES attribute, Object iValue);
 
-	public OProperty getProperty(int iIndex) {
-		for (OProperty prop : properties.values())
-			if (prop.getId() == iIndex)
-				return prop;
+	/**
+	 * Creates database index that is based on passed in field names. Given index will be added into class instance and associated
+	 * with database index.
+	 * 
+	 * @param fields
+	 *          Field names from which index will be created.
+	 * @param iName
+	 *          Database index name
+	 * @param iType
+	 *          Index type.
+	 * 
+	 * @return Class index registered inside of given class ans associated with database index.
+	 */
+	public OIndex<?> createIndex(String iName, INDEX_TYPE iType, String... fields);
 
-		throw new OSchemaException("Property with index " + iIndex + " was not found in class: " + name);
-	}
+	/**
+	 * Creates database index that is based on passed in field names. Given index will be added into class instance.
+	 * 
+	 * @param fields
+	 *          Field names from which index will be created.
+	 * @param iName
+	 *          Database index name.
+	 * @param iType
+	 *          Index type.
+	 * @param iProgressListener
+	 *          Progress listener.
+	 * 
+	 * @return Class index registered inside of given class ans associated with database index.
+	 */
+	public OIndex<?> createIndex(String iName, INDEX_TYPE iType, OProgressListener iProgressListener, String... fields);
 
-	public int getPropertyIndex(String iPropertyName) {
-		OProperty prop = properties.get(iPropertyName.toLowerCase());
-		if (prop == null)
-			return -1;
-		return prop.getId();
-	}
+	/**
+	 * Returns list of indexes that contain passed in fields names as their first keys. Order of fields does not matter.
+	 * 
+	 * All indexes sorted by their count of parameters in ascending order. If there are indexes for the given set of fields in super
+	 * class they will be taken into account.
+	 * 
+	 * 
+	 * 
+	 * @param fields
+	 *          Field names.
+	 * 
+	 * @return list of indexes that contain passed in fields names as their first keys.
+	 * 
+	 * @see com.orientechnologies.orient.core.index.OIndexDefinition#getParamCount()
+	 */
+	public Set<OIndex<?>> getInvolvedIndexes(Collection<String> fields);
 
-	public OProperty createProperty(String iPropertyName, OType iType) {
-		if (iType == OType.LINK || iType == OType.LINKLIST || iType == OType.LINKSET)
-			throw new OSchemaException("Can't add property '" + iPropertyName
-					+ "' since it contains a relationship but no linked class was received");
+	/**
+	 * 
+	 * 
+	 * @param fields
+	 *          Field names.
+	 * @return <code>true</code> if given fields are contained as first key fields in class indexes.
+	 * 
+	 * @see #getInvolvedIndexes(java.util.Collection)
+	 */
+	public Set<OIndex<?>> getInvolvedIndexes(String... fields);
 
-		return addProperty(iPropertyName, iType, fixedSize);
-	}
+	/**
+	 * Returns list of indexes that contain passed in fields names as their first keys. Order of fields does not matter.
+	 * 
+	 * Indexes that related only to the given class will be returned.
+	 * 
+	 * 
+	 * 
+	 * @param fields
+	 *          Field names.
+	 * 
+	 * @return list of indexes that contain passed in fields names as their first keys.
+	 * 
+	 * @see com.orientechnologies.orient.core.index.OIndexDefinition#getParamCount()
+	 */
+	public Set<OIndex<?>> getClassInvolvedIndexes(Collection<String> fields);
 
-	public OProperty createProperty(String iPropertyName, OType iType, OClass iLinkedClass) {
-		OProperty prop = addProperty(iPropertyName, iType, fixedSize);
-		prop.setLinkedClass(iLinkedClass);
-		return prop;
-	}
+	/**
+	 * 
+	 * 
+	 * @param fields
+	 *          Field names.
+	 * @return list of indexes that contain passed in fields names as their first keys.
+	 * 
+	 * @see #getClassInvolvedIndexes(java.util.Collection)
+	 */
+	public Set<OIndex<?>> getClassInvolvedIndexes(String... fields);
 
-	public OProperty createProperty(String iPropertyName, OType iType, OType iLinkedType) {
-		OProperty prop = addProperty(iPropertyName, iType, fixedSize);
-		prop.setLinkedType(iLinkedType);
-		return prop;
-	}
+	/**
+	 * Indicates whether given fields are contained as first key fields in class indexes. Order of fields does not matter. If there
+	 * are indexes for the given set of fields in super class they will be taken into account.
+	 * 
+	 * @param fields
+	 *          Field names.
+	 * 
+	 * @return <code>true</code> if given fields are contained as first key fields in class indexes.
+	 */
+	public boolean areIndexed(Collection<String> fields);
 
-	public int fixedSize() {
-		return fixedSize;
-	}
+	/**
+	 * @param fields
+	 *          Field names.
+	 * @return <code>true</code> if given fields are contained as first key fields in class indexes.
+	 * @see #areIndexed(java.util.Collection)
+	 */
+	public boolean areIndexed(String... fields);
 
-	public boolean existsProperty(String iPropertyName) {
-		return properties.containsKey(iPropertyName);
-	}
+	/**
+	 * Returns index instance by database index name.
+	 * 
+	 * @param iName
+	 *          Database index name.
+	 * @return Index instance.
+	 */
+	public OIndex<?> getClassIndex(String iName);
 
-	protected OProperty addProperty(String iName, OType iType, int iOffset) {
-		OProperty prop = new OProperty(this, iName, iType, iOffset);
+	/**
+	 * @return All indexes for given class.
+	 */
+	public Set<OIndex<?>> getClassIndexes();
 
-		properties.put(iName.toLowerCase(), prop);
-		fixedSize += iType.size;
+	/**
+	 * @return All indexes for given class and its super classes.
+	 */
+	public Set<OIndex<?>> getIndexes();
 
-		owner.setDirty();
-
-		return prop;
-	}
-
-	public void fromStream(ORecordPositional<String> iRecord) {
-
-		defaultClusterId = Integer.parseInt(iRecord.next());
-
-		// READ CLUSTER IDS
-		clusterIds = OStringSerializerHelper.splitIntArray(iRecord.next());
-
-		// READ PROPERTIES
-		int propsNum = Integer.parseInt(iRecord.next());
-		OProperty prop;
-		for (int k = 0; k < propsNum; ++k) {
-			prop = new OProperty(this);
-			prop.fromStream(iRecord);
-			properties.put(prop.getName().toLowerCase(), prop);
-		}
-	}
-
-	public void toStream(ORecordPositional<String> iRecord) {
-		iRecord.add(name);
-
-		iRecord.add(String.valueOf(defaultClusterId));
-
-		// WRITE CLUSTER IDS
-		iRecord.add(OStringSerializerHelper.joinIntArray(clusterIds));
-
-		// WRITE PROPERTIES
-		iRecord.add(String.valueOf(properties.size()));
-		for (OProperty prop : properties.values()) {
-			prop.toStream(iRecord);
-		}
-	}
-
-	public Class<?> getJavaClass() {
-		return javaClass;
-	}
-
-	public int getId() {
-		return id;
-	}
-
-	public int getDefaultClusterId() {
-		return defaultClusterId;
-	}
-
-	public void setDefaultClusterId(int iDefaultClusterId) {
-		this.defaultClusterId = iDefaultClusterId;
-		owner.setDirty();
-	}
-
-	public int[] getClusterIds() {
-		return clusterIds;
-	}
-
-	public OClass addClusterIds(int iId) {
-		for (int currId : clusterIds)
-			if (currId == iId)
-				return this;
-
-		clusterIds = Arrays.copyOf(clusterIds, clusterIds.length + 1);
-		owner.setDirty();
-		return this;
-	}
-
-	@Override
-	public String toString() {
-		return name + " (id=" + id + ", cluster=" + defaultClusterId + ")";
-	}
+	public abstract void setDefaultClusterId(final int iDefaultClusterId);
 }

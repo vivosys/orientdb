@@ -28,11 +28,11 @@ public class OStreamSerializerString implements OStreamSerializer {
 		return NAME;
 	}
 
-	public Object fromStream(byte[] iStream) throws IOException {
+	public Object fromStream(final byte[] iStream) throws IOException {
 		return OBinaryProtocol.bytes2string(iStream);
 	}
 
-	public byte[] toStream(Object iObject) throws IOException {
+	public byte[] toStream(final Object iObject) throws IOException {
 		return OBinaryProtocol.string2bytes((String) iObject);
 	}
 }

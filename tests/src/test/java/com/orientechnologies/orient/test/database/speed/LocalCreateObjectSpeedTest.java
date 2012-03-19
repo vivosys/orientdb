@@ -38,7 +38,7 @@ public class LocalCreateObjectSpeedTest extends OrientMonoThreadTest {
 	}
 
 	public LocalCreateObjectSpeedTest() throws InstantiationException, IllegalAccessException {
-		super(1000000);
+		super(100000);
 	}
 
 	@Override
@@ -51,6 +51,7 @@ public class LocalCreateObjectSpeedTest extends OrientMonoThreadTest {
 		database.begin(TXTYPE.NOTX);
 	}
 
+	@Override
 	public void cycle() {
 		account = new Account((int) data.getCyclesDone(), "Luca", "Garulli");
 		account.setBirthDate(date);

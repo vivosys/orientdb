@@ -21,9 +21,16 @@ import org.testng.Assert;
 import org.testng.annotations.Parameters;
 import org.testng.annotations.Test;
 
-import com.orientechnologies.orient.client.remote.OEngineRemote;
-import com.orientechnologies.orient.core.Orient;
+import com.orientechnologies.orient.core.db.ODatabase;
+import com.orientechnologies.orient.core.db.ODatabaseListener;
+import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 import com.orientechnologies.orient.core.db.record.ODatabaseFlat;
+import com.orientechnologies.orient.core.exception.OConcurrentModificationException;
+import com.orientechnologies.orient.core.exception.OTransactionException;
+import com.orientechnologies.orient.core.index.OIndexException;
+import com.orientechnologies.orient.core.metadata.schema.OClass;
+import com.orientechnologies.orient.core.metadata.schema.OType;
+import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.record.impl.ORecordFlat;
 
 @Test(groups = "dictionary")
@@ -32,7 +39,6 @@ public class TransactionAtomicTest {
 
 	@Parameters(value = "url")
 	public TransactionAtomicTest(String iURL) {
-		Orient.instance().registerEngine(new OEngineRemote());
 		url = iURL;
 	}
 
@@ -48,17 +54,138 @@ public class TransactionAtomicTest {
 		record1.value("This is the first version").save();
 
 		// RE-READ THE RECORD
-		record1.load();
+		record1.reload();
 		ORecordFlat record2 = db2.load(record1.getIdentity());
 
 		record2.value("This is the second version").save();
-		record1.value("This is the third version").save();
+		record2.value("This is the third version").save();
 
-		record1 = db1.load(record1.getIdentity());
+		record1.reload(null, true);
 
-		Assert.assertTrue(record1.value().equals("This is the third version"));
+		Assert.assertEquals(record1.value(), "This is the third version");
 
 		db1.close();
 		db2.close();
+	}
+
+	@Test
+	public void testMVCC() throws IOException {
+		ODatabaseDocumentTx db = new ODatabaseDocumentTx(url);
+		db.open("admin", "admin");
+
+		ODocument doc = new ODocument("Account");
+		doc.field("version", 0);
+		doc.save();
+
+		doc.setDirty();
+		doc.setVersion(1);
+		try {
+			doc.save();
+			Assert.assertTrue(false);
+		} catch (OConcurrentModificationException e) {
+			Assert.assertTrue(true);
+		}
+
+		db.close();
+	}
+
+	@Test(expectedExceptions = OTransactionException.class)
+	public void testTransactionPreListenerRollback() throws IOException {
+		ODatabaseFlat db = new ODatabaseFlat(url);
+		db.open("admin", "admin");
+
+		ORecordFlat record1 = new ORecordFlat(db);
+		record1.value("This is the first version").save();
+
+		db.registerListener(new ODatabaseListener() {
+
+			public void onAfterTxCommit(ODatabase iDatabase) {
+			}
+
+			public void onAfterTxRollback(ODatabase iDatabase) {
+			}
+
+			public void onBeforeTxBegin(ODatabase iDatabase) {
+			}
+
+			public void onBeforeTxCommit(ODatabase iDatabase) {
+				throw new RuntimeException("Rollback test");
+			}
+
+			public void onBeforeTxRollback(ODatabase iDatabase) {
+			}
+
+			public void onClose(ODatabase iDatabase) {
+			}
+
+			public void onCreate(ODatabase iDatabase) {
+			}
+
+			public void onDelete(ODatabase iDatabase) {
+			}
+
+			public void onOpen(ODatabase iDatabase) {
+			}
+
+			public boolean onCorruptionRepairDatabase(ODatabase iDatabase, final String iReason, String iWhatWillbeFixed) {
+				return true;
+			}
+		});
+
+		db.commit();
+
+		db.close();
+	}
+
+	@Test
+	public void testTransactionWithDuplicateUniqueIndexValues() {
+		ODatabaseDocumentTx db = new ODatabaseDocumentTx(url);
+		db.open("admin", "admin");
+
+		OClass fruitClass = db.getMetadata().getSchema().getClass("Fruit");
+
+		if (fruitClass == null) {
+			fruitClass = db.getMetadata().getSchema().createClass("Fruit");
+
+			fruitClass.createProperty("name", OType.STRING);
+			fruitClass.createProperty("color", OType.STRING);
+
+			db.getMetadata().getSchema().getClass("Fruit").getProperty("color").createIndex(OClass.INDEX_TYPE.UNIQUE);
+		}
+
+		Assert.assertEquals(db.countClusterElements("Fruit"), 0);
+
+		try {
+			db.begin();
+
+			ODocument apple = new ODocument("Fruit").field("name", "Apple").field("color", "Red");
+			ODocument orange = new ODocument("Fruit").field("name", "Orange").field("color", "Orange");
+			ODocument banana = new ODocument("Fruit").field("name", "Banana").field("color", "Yellow");
+			ODocument kumquat = new ODocument("Fruit").field("name", "Kumquat").field("color", "Orange");
+
+			apple.save();
+			Assert.assertEquals(apple.getIdentity().getClusterId(), fruitClass.getDefaultClusterId());
+
+			orange.save();
+			Assert.assertEquals(orange.getIdentity().getClusterId(), fruitClass.getDefaultClusterId());
+
+			banana.save();
+			Assert.assertEquals(banana.getIdentity().getClusterId(), fruitClass.getDefaultClusterId());
+
+			kumquat.save();
+			Assert.assertEquals(kumquat.getIdentity().getClusterId(), fruitClass.getDefaultClusterId());
+
+			db.commit();
+			Assert.assertTrue(false);
+
+		} catch (OIndexException e) {
+			Assert.assertTrue(true);
+			db.rollback();
+
+		}
+
+		Assert.assertEquals(db.countClusterElements("Fruit"), 0);
+
+		db.close();
 	}
 }

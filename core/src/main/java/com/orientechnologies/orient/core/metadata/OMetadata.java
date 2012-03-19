@@ -15,54 +15,61 @@
  */
 package com.orientechnologies.orient.core.metadata;
 
+import java.io.IOException;
+import java.util.concurrent.Callable;
+
 import com.orientechnologies.common.profiler.OProfiler;
+import com.orientechnologies.orient.core.db.ODatabase;
+import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
 import com.orientechnologies.orient.core.db.record.ODatabaseRecord;
+import com.orientechnologies.orient.core.index.OIndexManager;
+import com.orientechnologies.orient.core.index.OIndexManagerProxy;
+import com.orientechnologies.orient.core.index.OIndexManagerRemote;
+import com.orientechnologies.orient.core.index.OIndexManagerShared;
 import com.orientechnologies.orient.core.metadata.schema.OSchema;
+import com.orientechnologies.orient.core.metadata.schema.OSchemaProxy;
+import com.orientechnologies.orient.core.metadata.schema.OSchemaShared;
 import com.orientechnologies.orient.core.metadata.security.OSecurity;
+import com.orientechnologies.orient.core.metadata.security.OSecurityNull;
+import com.orientechnologies.orient.core.metadata.security.OSecurityProxy;
+import com.orientechnologies.orient.core.metadata.security.OSecurityShared;
+import com.orientechnologies.orient.core.storage.OStorage;
+import com.orientechnologies.orient.core.storage.OStorageEmbedded;
 
 public class OMetadata {
-	public static final String		CLUSTER_METADATA_NAME	= "metadata";
-
-	protected ODatabaseRecord<?>	database;
 	protected int									schemaClusterId;
 
-	protected OSchema							schema;
+	protected OSchemaProxy				schema;
 	protected OSecurity						security;
+	protected OIndexManagerProxy	indexManager;
 
-	public OMetadata(ODatabaseRecord<?> iDatabase) {
-		this.database = iDatabase;
+	public OMetadata() {
 	}
 
 	public void load() {
 		final long timer = OProfiler.getInstance().startChrono();
 
-		init();
-
 		try {
-			if (schemaClusterId == -1 || database.countClusterElements(CLUSTER_METADATA_NAME) == 0)
-				return;
+			init(true);
 
-			loadSchema();
-			loadSecurity();
+			if (schemaClusterId == -1 || getDatabase().countClusterElements(OStorage.CLUSTER_INTERNAL_NAME) == 0)
+				return;
 		} finally {
 			OProfiler.getInstance().stopChrono("OMetadata.load", timer);
 		}
 	}
 
-	public void create() {
+	public void create() throws IOException {
 		final long timer = OProfiler.getInstance().startChrono();
 
-		init();
-
 		try {
-			// CREATE RECORD FOR SCHEMA
-			schema.save(CLUSTER_METADATA_NAME);
+			init(false);
 
-			// CREATE RECORD FOR SECURITY
-			security.save(CLUSTER_METADATA_NAME);
+			schema.create();
+			security.create();
+			indexManager.create();
 		} finally {
-
-			OProfiler.getInstance().stopChrono("OMetadata.create", timer);
+			OProfiler.getInstance().stopChrono("OMetadata.load", timer);
 		}
 	}
 
@@ -74,22 +81,82 @@ public class OMetadata {
 		return security;
 	}
 
+	public OIndexManagerProxy getIndexManager() {
+		return indexManager;
+	}
+
 	public int getSchemaClusterId() {
 		return schemaClusterId;
 	}
 
-	public void loadSchema() {
-		schema.load(schemaClusterId);
+	private void init(final boolean iLoad) {
+		final ODatabaseRecord database = getDatabase();
+		schemaClusterId = database.getClusterIdByName(OStorage.CLUSTER_INTERNAL_NAME);
+
+		indexManager = new OIndexManagerProxy(database.getStorage().getResource(OIndexManager.class.getSimpleName(),
+				new Callable<OIndexManager>() {
+					public OIndexManager call() {
+						OIndexManager instance;
+						if (database.getStorage() instanceof OStorageEmbedded)
+							instance = new OIndexManagerShared(database);
+						else
+							instance = new OIndexManagerRemote(database);
+
+						if (iLoad)
+							instance.load();
+
+						return instance;
+					}
+				}), database);
+
+		schema = new OSchemaProxy(database.getStorage().getResource(OSchema.class.getSimpleName(), new Callable<OSchemaShared>() {
+			public OSchemaShared call() {
+				final OSchemaShared instance = new OSchemaShared(schemaClusterId);
+				if (iLoad)
+					instance.load();
+				return instance;
+			}
+		}), database);
+
+		final Boolean enableSecurity = (Boolean) database.getProperty(ODatabase.OPTIONS.SECURITY.toString());
+		if (enableSecurity != null && !enableSecurity)
+			// INSTALL NO SECURITY IMPL
+			security = new OSecurityNull();
+		else
+			security = new OSecurityProxy(database.getStorage().getResource(OSecurity.class.getSimpleName(),
+					new Callable<OSecurityShared>() {
+						public OSecurityShared call() {
+							final OSecurityShared instance = new OSecurityShared();
+							if (iLoad)
+								instance.load();
+							return instance;
+						}
+					}), database);
+
 	}
 
-	public void loadSecurity() {
-		security.load(schemaClusterId);
+	/**
+	 * Reloads the internal objects.
+	 */
+	public void reload() {
+		schema.reload();
+		indexManager.load();
+		security.load();
 	}
 
-	private void init() {
-		schemaClusterId = database.getClusterIdByName(CLUSTER_METADATA_NAME);
+	/**
+	 * Closes internal objects
+	 */
+	public void close() {
+		if (indexManager != null)
+			indexManager.flush();
+		if (schema != null)
+			schema.close();
+		if (security != null)
+			security.close();
+	}
 
-		schema = new OSchema(database, schemaClusterId);
-		security = new OSecurity(database, schemaClusterId);
+	protected ODatabaseRecord getDatabase() {
+		return ODatabaseRecordThreadLocal.INSTANCE.get();
 	}
 }

@@ -1,10 +1,39 @@
+/*
+ * Copyright 1999-2011 Luca Garulli (l.garulli--at--orientechnologies.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.orientechnologies.common.util;
 
 import java.util.Map.Entry;
 
-public class OPair<K, V> implements Entry<K, V> {
+/**
+ * Keeps a pair of values as Key/Value.
+ * 
+ * @author Luca Garulli (l.garulli--at--orientechnologies.com)
+ * 
+ * @param <K>
+ *          Key
+ * @param <V>
+ *          Value
+ * @see OTriple
+ */
+public class OPair<K extends Comparable<K>, V> implements Entry<K, V>, Comparable<OPair<K, V>> {
 	public K	key;
 	public V	value;
+
+	public OPair() {
+	}
 
 	public OPair(final K iKey, final V iValue) {
 		key = iKey;
@@ -14,6 +43,11 @@ public class OPair<K, V> implements Entry<K, V> {
 	public OPair(final Entry<K, V> iSource) {
 		key = iSource.getKey();
 		value = iSource.getValue();
+	}
+
+	public void init(final K iKey, final V iValue) {
+		key = iKey;
+		value = iValue;
 	}
 
 	public K getKey() {
@@ -58,5 +92,9 @@ public class OPair<K, V> implements Entry<K, V> {
 		} else if (!key.equals(other.key))
 			return false;
 		return true;
+	}
+
+	public int compareTo(final OPair<K, V> o) {
+		return key.compareTo(o.key);
 	}
 }

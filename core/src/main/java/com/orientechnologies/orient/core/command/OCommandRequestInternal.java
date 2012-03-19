@@ -15,7 +15,10 @@
  */
 package com.orientechnologies.orient.core.command;
 
-import com.orientechnologies.orient.core.db.record.ODatabaseRecord;
+import java.util.Map;
+
+import com.orientechnologies.common.listener.OProgressListener;
+import com.orientechnologies.orient.core.serialization.OSerializableStream;
 
 /**
  * Internal specialization of generic OCommand interface.
@@ -24,10 +27,16 @@ import com.orientechnologies.orient.core.db.record.ODatabaseRecord;
  * 
  * @param <T>
  */
-public interface OCommandRequestInternal extends OCommandRequest {
-	public String getText();
+public interface OCommandRequestInternal extends OCommandRequest, OSerializableStream {
+	public Map<Object, Object> getParameters();
 
-	public ODatabaseRecord<?> getDatabase();
+	public OCommandResultListener getResultListener();
 
-	public OCommandRequestInternal setDatabase(final ODatabaseRecord<?> iDatabase);
+	public void setResultListener(OCommandResultListener iListener);
+
+	public OProgressListener getProgressListener();
+
+	public OCommandRequestInternal setProgressListener(OProgressListener iProgressListener);
+
+	public void reset();
 }

@@ -15,17 +15,11 @@
  */
 package com.orientechnologies.orient.core.config;
 
-import javax.xml.bind.annotation.XmlAttribute;
-import javax.xml.bind.annotation.XmlRootElement;
-import javax.xml.bind.annotation.XmlType;
+import java.io.Serializable;
 
-@XmlRootElement(name = "entry")
-@XmlType(propOrder = { "name", "value" })
-public class OStorageEntryConfiguration {
-	@XmlAttribute
+@SuppressWarnings("serial")
+public class OStorageEntryConfiguration implements Serializable {
 	public String	name;
-
-	@XmlAttribute
 	public String	value;
 
 	public OStorageEntryConfiguration() {

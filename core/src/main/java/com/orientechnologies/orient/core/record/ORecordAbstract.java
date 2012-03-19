@@ -16,242 +16,357 @@
 package com.orientechnologies.orient.core.record;
 
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Set;
+import java.util.WeakHashMap;
 
+import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
 import com.orientechnologies.orient.core.db.record.ODatabaseRecord;
-import com.orientechnologies.orient.core.exception.ODatabaseException;
+import com.orientechnologies.orient.core.db.record.OIdentifiable;
+import com.orientechnologies.orient.core.db.record.ORecordElement;
 import com.orientechnologies.orient.core.exception.ORecordNotFoundException;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.id.ORecordId;
 import com.orientechnologies.orient.core.serialization.serializer.record.ORecordSerializer;
-import com.orientechnologies.orient.core.serialization.serializer.record.OSerializationThreadLocal;
 import com.orientechnologies.orient.core.serialization.serializer.record.string.ORecordSerializerJSON;
 
-@SuppressWarnings("unchecked")
+@SuppressWarnings({ "unchecked", "serial" })
 public abstract class ORecordAbstract<T> implements ORecord<T>, ORecordInternal<T> {
-	protected ODatabaseRecord		database;
-	protected ORecordId					recordId;
-	protected int								version;
-	protected byte[]						source;
-	protected ORecordSerializer	recordFormat;
-	protected boolean						pinned	= false;
-	protected boolean						dirty		= true;
-	protected STATUS						status	= STATUS.NEW;
+	protected ORecordId												_recordId;
+	protected int															_version;
+	protected byte[]													_source;
+	protected int															_size;
+	protected transient ORecordSerializer			_recordFormat;
+	protected Boolean													_pinned			= null;
+	protected boolean													_dirty			= true;
+	protected ORecordElement.STATUS						_status			= ORecordElement.STATUS.LOADED;
+	protected transient Set<ORecordListener>	_listeners	= null;
 
 	public ORecordAbstract() {
 	}
 
-	public ORecordAbstract(final ODatabaseRecord iDatabase) {
-		database = iDatabase;
-	}
-
-	public ORecordAbstract(final ODatabaseRecord iDatabase, final byte[] iSource) {
-		this(iDatabase);
-		source = iSource;
+	public ORecordAbstract(final byte[] iSource) {
+		_source = iSource;
+		_size = iSource.length;
 		unsetDirty();
 	}
 
-	public ORecordAbstract fill(final ODatabaseRecord<?> iDatabase, final int iClusterId, final long iPosition, final int iVersion) {
-		database = iDatabase;
-		setIdentity(iClusterId, iPosition);
-		version = iVersion;
+	public ORecordAbstract<?> fill(final ORecordId iRid, final int iVersion, final byte[] iBuffer, boolean iDirty) {
+		_recordId.clusterId = iRid.clusterId;
+		_recordId.clusterPosition = iRid.clusterPosition;
+		_version = iVersion;
+		_status = ORecordElement.STATUS.LOADED;
+		_source = iBuffer;
+		_size = iBuffer != null ? iBuffer.length : 0;
+		if (_source != null && _source.length > 0)
+			_dirty = iDirty;
+
 		return this;
 	}
 
 	public ORID getIdentity() {
-		return recordId;
+		return _recordId;
 	}
 
-	public ORecordAbstract setIdentity(final int iClusterId, final long iPosition) {
-		status = STATUS.NOT_LOADED;
+	public ORecord<?> getRecord() {
+		return this;
+	}
 
-		if (recordId == null)
-			recordId = new ORecordId(iClusterId, iPosition);
+	public ORecordAbstract<?> setIdentity(final int iClusterId, final long iClusterPosition) {
+		if (_recordId == null || _recordId == ORecordId.EMPTY_RECORD_ID)
+			_recordId = new ORecordId(iClusterId, iClusterPosition);
 		else {
-			recordId.clusterId = iClusterId;
-			recordId.clusterPosition = iPosition;
+			_recordId.clusterId = iClusterId;
+			_recordId.clusterPosition = iClusterPosition;
 		}
 		return this;
 	}
 
+	public ORecordAbstract<?> setIdentity(final ORecordId iIdentity) {
+		_recordId = iIdentity;
+		return this;
+	}
+
+	public boolean detach() {
+		return true;
+	}
+
+	public ORecordAbstract<T> clear() {
+		setDirty();
+		invokeListenerEvent(ORecordListener.EVENT.CLEAR);
+		return this;
+	}
+
 	public ORecordAbstract<T> reset() {
-		status = STATUS.NEW;
+		_status = ORecordElement.STATUS.LOADED;
+		_version = 0;
 
 		setDirty();
-		source = null;
-		if (recordId != null)
-			recordId.reset();
+		if (_recordId != null)
+			_recordId.reset();
+
+		invokeListenerEvent(ORecordListener.EVENT.RESET);
+
 		return this;
 	}
 
 	public byte[] toStream() {
-		if (source == null)
-			source = recordFormat.toStream(database, this);
+		if (_source == null)
+			_source = _recordFormat.toStream(this, false);
 
-		return source;
+		invokeListenerEvent(ORecordListener.EVENT.MARSHALL);
+
+		return _source;
 	}
 
 	public ORecordAbstract<T> fromStream(final byte[] iRecordBuffer) {
-		status = STATUS.NOT_LOADED;
-		source = iRecordBuffer;
+		_dirty = false;
+		_source = iRecordBuffer;
+		_size = iRecordBuffer != null ? iRecordBuffer.length : 0;
+		_status = ORecordElement.STATUS.LOADED;
+
+		invokeListenerEvent(ORecordListener.EVENT.UNMARSHALL);
+
 		return this;
 	}
 
 	public void unsetDirty() {
-		if (dirty)
-			dirty = false;
+		if (_dirty)
+			_dirty = false;
 	}
 
-	public void setDirty() {
-		if (!dirty)
-			dirty = true;
-		source = null;
-	}
-
-	public boolean isDirty() {
-		return dirty;
-	}
-
-	public boolean isPinned() {
-		return pinned;
-	}
-
-	public void pin() {
-		if (!pinned)
-			pinned = true;
-	}
-
-	public void unpin() {
-		if (pinned)
-			pinned = false;
-	}
-
-	public ODatabaseRecord getDatabase() {
-		return database;
-	}
-
-	public ORecordAbstract setDatabase(final ODatabaseRecord storage) {
-		this.database = storage;
+	public ORecordAbstract<T> setDirty() {
+		if (!_dirty && _status != STATUS.UNMARSHALLING)
+			_dirty = true;
+		_source = null;
 		return this;
 	}
 
+	public void onBeforeIdentityChanged(final ORID iRID) {
+	}
+
+	public void onAfterIdentityChanged(final ORecord<?> iRecord) {
+		invokeListenerEvent(ORecordListener.EVENT.IDENTITY_CHANGED);
+	}
+
+	public boolean isDirty() {
+		return _dirty;
+	}
+
+	public Boolean isPinned() {
+		return _pinned;
+	}
+
+	public ORecordAbstract<T> pin() {
+		_pinned = Boolean.TRUE;
+		return this;
+	}
+
+	public ORecordAbstract<T> unpin() {
+		_pinned = Boolean.FALSE;
+		return this;
+	}
+
+	public <RET extends ORecord<T>> RET fromJSON(final String iSource) {
+		ORecordSerializerJSON.INSTANCE.fromString(iSource, this);
+		return (RET) this;
+	}
+
 	public String toJSON() {
-		return toJSON("id,ver,class");
+		return toJSON("rid,version,class,type,attribSameRow,alwaysFetchEmbedded,fetchPlan:*:0");
 	}
 
 	public String toJSON(final String iFormat) {
-		return ORecordSerializerJSON.INSTANCE.toString(this, iFormat);
+		return ORecordSerializerJSON.INSTANCE.toString(this, new StringBuilder(), iFormat).toString();
 	}
 
 	@Override
 	public String toString() {
-		return "@" + (recordId.isValid() ? recordId : "") + "[" + Arrays.toString(source) + "]";
+		return (_recordId.isValid() ? _recordId : "") + (_source != null ? Arrays.toString(_source) : "[]") + " v" + _version;
 	}
 
 	public int getVersion() {
-		return version;
+		return _version;
 	}
 
 	public void setVersion(final int iVersion) {
-		version = iVersion;
+		_version = iVersion;
 	}
 
-	public ORecordAbstract<T> load() {
-		if (database == null)
-			throw new ODatabaseException("No database assigned to current record");
-
-		if (database.load(this) == null)
-			throw new ORecordNotFoundException("Record id: " + getIdentity());
-
+	public ORecordAbstract<T> unload() {
+		_status = ORecordElement.STATUS.NOT_LOADED;
+		_source = null;
+		unsetDirty();
+		invokeListenerEvent(ORecordListener.EVENT.UNLOAD);
 		return this;
 	}
 
+	public ORecordInternal<T> load() {
+		if (!getIdentity().isValid())
+			throw new ORecordNotFoundException("The record has no id, probably it's new or transient yet ");
+
+		try {
+			final ORecordInternal<?> result = getDatabase().load(this);
+
+			if (result == null)
+				throw new ORecordNotFoundException("The record with id '" + getIdentity() + "' not found");
+
+			return (ORecordInternal<T>) result;
+		} catch (Exception e) {
+			throw new ORecordNotFoundException("The record with id '" + getIdentity() + "' not found", e);
+		}
+	}
+
+	public ODatabaseRecord getDatabase() {
+		return ODatabaseRecordThreadLocal.INSTANCE.get();
+	}
+
+	public ORecordInternal<T> reload() {
+		return reload(null);
+	}
+
+	public ORecordInternal<T> reload(final String iFetchPlan) {
+		return reload(null, true);
+	}
+
+	public ORecordInternal<T> reload(final String iFetchPlan, final boolean iIgnoreCache) {
+		if (!getIdentity().isValid())
+			throw new ORecordNotFoundException("The record has no id. It is probably new or still transient");
+
+		try {
+			getDatabase().reload(this, iFetchPlan, iIgnoreCache);
+
+			// GET CONTENT
+			// fromStream(toStream());
+
+			return this;
+		} catch (Exception e) {
+			throw new ORecordNotFoundException("The record with id '" + getIdentity() + "' not found", e);
+		}
+	}
+
 	public ORecordAbstract<T> save() {
-		if (database == null)
-			throw new ODatabaseException("No database assigned to current record. Create it using the <DB>.newInstance()");
+		getDatabase().save(this);
 
-		OSerializationThreadLocal.INSTANCE.get().clear();
-
-		database.save(this);
 		return this;
 	}
 
 	public ORecordAbstract<T> save(final String iClusterName) {
-		if (database == null)
-			throw new ODatabaseException("No database assigned to current record");
-
-		OSerializationThreadLocal.INSTANCE.get().clear();
-
-		database.save(this, iClusterName);
-		return this;
-	}
-
-	public ORecordAbstract<T> save(ODatabaseRecord<?> iDatabase) {
-		if (database != null)
-			throw new IllegalArgumentException("Can't change database to a live record");
-
-		database = iDatabase;
-		database.save(this);
-		return this;
-	}
-
-	public ORecordAbstract<T> save(ODatabaseRecord<?> iDatabase, final String iClusterName) {
-		if (database != null)
-			throw new IllegalArgumentException("Can't change database to a live record");
-
-		database = iDatabase;
-		database.save(this, iClusterName);
+		getDatabase().save(this, iClusterName);
 		return this;
 	}
 
 	public ORecordAbstract<T> delete() {
-		if (database == null)
-			throw new ODatabaseException("No database assigned to current record");
-
-		database.delete(this);
+		getDatabase().delete(this);
+		setDirty();
 		return this;
 	}
 
+	public int getSize() {
+		return _size;
+	}
+
 	protected void setup() {
-		if (recordId == null)
-			recordId = new ORecordId();
+		if (_recordId == null)
+			_recordId = new ORecordId();
 	}
 
 	@Override
 	public int hashCode() {
-		final int prime = 31;
-		int result = 1;
-		result = prime * result + ((database == null) ? 0 : database.hashCode());
-		result = prime * result + ((recordId == null) ? 0 : recordId.hashCode());
-		return result;
+		return _recordId != null ? _recordId.hashCode() : 0;
 	}
 
 	@Override
-	public boolean equals(Object obj) {
+	public boolean equals(final Object obj) {
 		if (this == obj)
 			return true;
 		if (obj == null)
 			return false;
-		if (getClass() != obj.getClass())
-			return false;
-		ORecordAbstract other = (ORecordAbstract) obj;
-		if (database == null) {
-			if (other.database != null)
-				return false;
-		} else if (!database.equals(other.database))
-			return false;
-		if (recordId == null) {
-			if (other.recordId != null)
-				return false;
-		} else if (!recordId.equals(other.recordId))
-			return false;
-		return true;
+
+		if (obj instanceof OIdentifiable)
+			return _recordId.equals(((OIdentifiable) obj).getIdentity());
+
+		return false;
 	}
 
-	public STATUS getStatus() {
-		return status;
+	public int compare(final OIdentifiable iFirst, final OIdentifiable iSecond) {
+		if (iFirst == null || iSecond == null)
+			return -1;
+		return iFirst.compareTo(iSecond);
 	}
 
-	public void setStatus(STATUS status) {
-		this.status = status;
+	public int compareTo(final OIdentifiable iOther) {
+		if (iOther == null)
+			return 1;
+
+		if (_recordId == null)
+			return iOther.getIdentity() == null ? 0 : 1;
+
+		return _recordId.compareTo(iOther.getIdentity());
+	}
+
+	public ORecordElement.STATUS getInternalStatus() {
+		return _status;
+	}
+
+	public void setInternalStatus(final ORecordElement.STATUS iStatus) {
+		this._status = iStatus;
+	}
+
+	public ORecordAbstract<T> copyTo(final ORecordAbstract<T> cloned) {
+		cloned._source = _source;
+		cloned._size = _size;
+		cloned._recordId = _recordId.copy();
+		cloned._version = _version;
+		cloned._pinned = _pinned;
+		cloned._status = _status;
+		cloned._recordFormat = _recordFormat;
+		cloned._listeners = null;
+		cloned._dirty = false;
+		return cloned;
+	}
+
+	/**
+	 * Add a listener to the current document to catch all the supported events.
+	 * 
+	 * @see ORecordListener
+	 * 
+	 * @param iListener
+	 *          ODocumentListener implementation
+	 */
+	public void addListener(final ORecordListener iListener) {
+		if (_listeners == null)
+			_listeners = Collections.newSetFromMap(new WeakHashMap<ORecordListener, Boolean>());
+
+		_listeners.add(iListener);
+	}
+
+	/**
+	 * Remove the current event listener.
+	 * 
+	 * @see ORecordListener
+	 */
+	public void removeListener(final ORecordListener listener) {
+		if (_listeners != null) {
+			_listeners.remove(listener);
+			if (_listeners.isEmpty())
+				_listeners = null;
+		}
+	}
+
+	protected void invokeListenerEvent(final ORecordListener.EVENT iEvent) {
+		if (_listeners != null)
+			for (final ORecordListener listener : _listeners)
+				if (listener != null)
+					listener.onEvent(this, iEvent);
+	}
+
+	public <RET extends ORecord<T>> RET flatCopy() {
+		return (RET) copy();
+	}
+
+	protected void checkForLoading() {
+		if (_status == ORecordElement.STATUS.NOT_LOADED && ODatabaseRecordThreadLocal.INSTANCE.isDefined())
+			reload(null, true);
 	}
 }

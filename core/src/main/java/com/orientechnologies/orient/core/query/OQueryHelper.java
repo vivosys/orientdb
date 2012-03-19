@@ -16,30 +16,22 @@
 package com.orientechnologies.orient.core.query;
 
 public class OQueryHelper {
-	protected static final String	WILDCARD_ANYCHAR			= "?";
-	protected static final String	WILDCARD_ANY					= "%";
+	protected static final String	WILDCARD_ANYCHAR	= "?";
+	protected static final String	WILDCARD_ANY			= "%";
 
-	public static final String		OPEN_BRACE						= "(";
-	public static final String		CLOSED_BRACE					= ")";
-	public static final String		OPEN_COLLECTION				= "[";
-	public static final String		CLOSED_COLLECTION			= "]";
-	public static final String		COLLECTION_SEPARATOR	= ",";
-	public static final String		PARAMETER_SEPARATOR		= ",";
-	public static final String[]	EMPTY_PARAMETERS			= new String[] {};
-
-	public static boolean like(String currentValue, String iValue) {
-		if (currentValue == null || currentValue.length() == 0)
-			// EMPTY FIELD
+	public static boolean like(final String currentValue, String iValue) {
+		if (currentValue == null || currentValue.length() == 0 || iValue == null || iValue.length() == 0)
+			// EMPTY/NULL PARAMETERS
 			return false;
 
-		int anyPos = iValue.indexOf(WILDCARD_ANY);
-		int charAnyPos = iValue.indexOf(WILDCARD_ANYCHAR);
+		final int anyPos = iValue.indexOf(WILDCARD_ANY);
+		final int charAnyPos = iValue.indexOf(WILDCARD_ANYCHAR);
 
 		if (anyPos == -1 && charAnyPos == -1)
 			// NO WILDCARDS: DO EQUALS
 			return currentValue.equals(iValue);
 
-		String value = currentValue.toString();
+		final String value = currentValue.toString();
 		if (value == null || value.length() == 0)
 			// NOTHING TO MATCH
 			return false;
@@ -48,7 +40,7 @@ public class OQueryHelper {
 			// %XXXXX%
 			iValue = iValue.substring(WILDCARD_ANY.length(), iValue.length() - WILDCARD_ANY.length());
 			return currentValue.indexOf(iValue) > -1;
-			
+
 		} else if (iValue.startsWith(WILDCARD_ANY)) {
 			// %XXXXX
 			iValue = iValue.substring(WILDCARD_ANY.length());
@@ -58,47 +50,15 @@ public class OQueryHelper {
 			// XXXXX%
 			iValue = iValue.substring(0, iValue.length() - WILDCARD_ANY.length());
 			return value.startsWith(iValue);
+
+		} else {
+			final int pos = iValue.indexOf(WILDCARD_ANY);
+			if (pos > -1) {
+				// XX%XXX
+				return value.startsWith(iValue.substring(0, pos)) && value.endsWith(iValue.substring(pos + 1));
+			}
 		}
 
 		return false;
-	}
-
-	public static String[] getParameters(final String iText) {
-		return getParameters(iText, 0);
-	}
-
-	public static String[] getParameters(final String iText, final int iBeginPosition) {
-		int openPos = iText.indexOf(OPEN_BRACE, iBeginPosition);
-		if (openPos == -1)
-			return EMPTY_PARAMETERS;
-
-		int closePos = iText.indexOf(CLOSED_BRACE, openPos + 1);
-		if (closePos == -1)
-			return EMPTY_PARAMETERS;
-
-		if (closePos - openPos == 1)
-			// EMPTY STRING: TREATS AS EMPTY
-			return EMPTY_PARAMETERS;
-
-		String[] pars = iText.substring(openPos + 1, closePos).split(PARAMETER_SEPARATOR);
-
-		// REMOVE TAIL AND END SPACES
-		for (int i = 0; i < pars.length; ++i)
-			pars[i] = pars[i].trim();
-
-		return pars;
-	}
-
-	public static Object getCollection(final String iText) {
-		int openPos = iText.indexOf(OPEN_COLLECTION);
-		if (openPos == -1)
-			return EMPTY_PARAMETERS;
-
-		int closePos = iText.indexOf(CLOSED_COLLECTION, openPos + 1);
-		if (closePos == -1)
-			return EMPTY_PARAMETERS;
-
-		// TODO BY IMPROVING IT CONSIDERING COMMAS INSIDE STRINGS!
-		return iText.substring(openPos + 1, closePos).split(COLLECTION_SEPARATOR);
 	}
 }

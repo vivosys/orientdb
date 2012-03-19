@@ -15,24 +15,33 @@
  */
 package com.orientechnologies.orient.core.sql.operator;
 
+import com.orientechnologies.orient.core.command.OCommandContext;
+import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.sql.filter.OSQLFilterCondition;
 
 /**
- * Base equality operator that not admit NULL in the LEFT and in the RIGHT operator. Abstract class.
+ * Base equality operator that not admit NULL in the LEFT and in the RIGHT operands. Abstract class.
  * 
  * @author Luca Garulli
  * 
  */
 public abstract class OQueryOperatorEqualityNotNulls extends OQueryOperatorEquality {
 
-	protected OQueryOperatorEqualityNotNulls(String iKeyword, int iPrecedence, boolean iLogical) {
+	protected OQueryOperatorEqualityNotNulls(final String iKeyword, final int iPrecedence, final boolean iLogical) {
 		super(iKeyword, iPrecedence, iLogical);
 	}
 
-	public boolean evaluate(final OSQLFilterCondition iCondition, final Object iLeft, final Object iRight) {
+	protected OQueryOperatorEqualityNotNulls(final String iKeyword, final int iPrecedence, final boolean iLogical,
+			final int iExpectedRightWords) {
+		super(iKeyword, iPrecedence, iLogical, iExpectedRightWords);
+	}
+
+	@Override
+	public Object evaluateRecord(final OIdentifiable iRecord, final OSQLFilterCondition iCondition, final Object iLeft,
+			final Object iRight, OCommandContext iContext) {
 		if (iLeft == null || iRight == null)
 			return false;
 
-		return super.evaluate(iCondition, iLeft, iRight);
+		return super.evaluateRecord(iRecord, iCondition, iLeft, iRight, iContext);
 	}
 }

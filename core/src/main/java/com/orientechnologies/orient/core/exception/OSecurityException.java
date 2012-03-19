@@ -17,15 +17,20 @@ package com.orientechnologies.orient.core.exception;
 
 import com.orientechnologies.common.exception.OException;
 
+/**
+ * Generic Security exception. Used in cryptography.
+ * 
+ * @author Luca Garulli (l.garulli--at--orientechnologies.com)
+ * 
+ */
+@SuppressWarnings("serial")
 public class OSecurityException extends OException {
 
-	private static final long	serialVersionUID	= -8486291378415776372L;
+  public OSecurityException(final String message, final Throwable cause) {
+    super(message, cause);
+  }
 
-	public OSecurityException(String message, Throwable cause) {
-		super(message, cause);
-	}
-
-	public OSecurityException(String message) {
-		super(message);
-	}
+  public OSecurityException(final String message) {
+    super(message);
+  }
 }
