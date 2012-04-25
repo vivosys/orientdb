@@ -62,6 +62,8 @@
 	<storages>
 		<!-- Default in-memory storage. Data are not saved permanently. -->
 		<storage path="memory:temp" name="temp" userName="admin" userPassword="admin" loaded-at-startup="true" />
+                <storage loaded-at-startup="true" userPassword="admin" userName="admin" path="local:databases/edelng" name="edelng"/>
+                <storage loaded-at-startup="true" userPassword="admin" userName="admin" path="local:databases/edelng-test" name="edelng-test"/>
 	</storages>
 	<users>
 	</users>
