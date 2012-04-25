@@ -38,6 +38,6 @@ goto setArgs
 
 :doneSetArgs
 
-call %JAVA% -client -Dfile.encoding=utf-8 -Dorientdb.build.number=@BUILD@ -jar "%ORIENTDB_HOME%\lib\orientdb-tools-@VERSION@.jar" %CMD_LINE_ARGS%
+call %JAVA% -client -Dfile.encoding=utf-8 -Dorientdb.build.number=5146 -jar "%ORIENTDB_HOME%\lib\orientdb-tools-1.0.vivo_1.jar" %CMD_LINE_ARGS%
 
 :end
