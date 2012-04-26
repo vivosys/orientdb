@@ -33,9 +33,9 @@ Implementation-Vendor-Id: com.orientechnologies
 Specification-Title: OrientDB Tools
 Bundle-License: http://www.apache.org/licenses/LICENSE-2.0.txt
 Bundle-SymbolicName: com.orientechnologies.orientdb-tools
-Implementation-Version: 1.0-SNAPSHOT
-Class-Path: orientdb-client-1.0-SNAPSHOT.jar orientdb-enterprise-1.0-S
- NAPSHOT.jar orientdb-core-1.0-SNAPSHOT.jar orient-commons-1.0-SNAPSHO
+Implementation-Version: 1.0.vivo_2
+Class-Path: orientdb-client-1.0.vivo_2.jar orientdb-enterprise-1.0-S
+ NAPSHOT.jar orientdb-core-1.0.vivo_2.jar orient-commons-1.0-SNAPSHO
  T.jar persistence-api-1.0.jar
 Specification-Vendor: Orient Technologies
 Bundle-Name: OrientDB Tools
@@ -71,6 +71,6 @@ Import-Package: com.orientechnologies.common.console,com.orientechnolo
  l,com.orientechnologies.orient.core.storage.impl.memory,com.orientech
  nologies.orient.core.tx,com.orientechnologies.orient.core.type,com.or
  ientechnologies.orient.enterprise.command
-Specification-Version: 1.0-SNAPSHOT
+Specification-Version: 1.0.vivo_2
 Main-Class: com.orientechnologies.orient.console.OConsoleDatabaseApp
 

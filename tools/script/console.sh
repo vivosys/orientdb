@@ -20,9 +20,9 @@ done
 PRGDIR=`dirname "$PRG"`
 
 # Only set ORIENTDB_HOME if not already set
-[ -f "$ORIENTDB_HOME"/lib/orientdb-tools-@VERSION@.jar ] || ORIENTDB_HOME=`cd "$PRGDIR/.." ; pwd`
+[ -f "$ORIENTDB_HOME"/lib/orientdb-tools-1.0.vivo_2.jar ] || ORIENTDB_HOME=`cd "$PRGDIR/.." ; pwd`
 export ORIENTDB_HOME
 
 # Only set ORIENTDB_HOME if not already set correctly
 
-java -client -Dfile.encoding=utf-8 -Dorientdb.build.number="@BUILD@" -jar $ORIENTDB_HOME/lib/orientdb-tools-@VERSION@.jar $*
+java -client -Dfile.encoding=utf-8 -Dorientdb.build.number="5371" -jar $ORIENTDB_HOME/lib/orientdb-tools-1.0.vivo_2.jar $*

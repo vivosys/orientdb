@@ -6,14 +6,14 @@
         branches = branches/*:refs/remotes/*
         tags = tags/*:refs/remotes/tags/*
 
-2. Replace @BUILD@:
+2. Replace 5371:
 
-for x in $(grep -l -R "@BUILD@" *); do sed -i -e 's/@BUILD@/5146/g' $x; done;
+for x in $(grep -l -R "5371" *); do sed -i -e 's/5371/5371/g' $x; done;
 
-3. Replace @VERSION@:
+3. Replace 1.0.vivo_2:
 
-for x in $(grep -l -R "@VERSION@" *); do sed -i -e 's/@VERSION@/1.0.vivo_1/g' $x; done;
+for x in $(grep -l -R "1.0.vivo_2" *); do sed -i -e 's/1.0.vivo_2/1.0.vivo_2/g' $x; done;
 
 4. Change project version:
 
-for x in $(grep -l -R 1.0-SNAPSHOT *); do sed -i -e 's/1.0-SNAPSHOT/1.0.vivo_1/g' $x; done;
+for x in $(grep -l -R 1.0-SNAPSHOT *); do sed -i -e 's/1.0-SNAPSHOT/1.0.vivo_2/g' $x; done;

@@ -258,10 +258,10 @@ Implementation-Vendor-Id: com.orientechnologies
 Specification-Title: OrientDB GraphDB
 Bundle-License: http://www.apache.org/licenses/LICENSE-2.0.txt
 Bundle-SymbolicName: com.orientechnologies.orientdb-graphdb
-Implementation-Version: 1.0-SNAPSHOT
-Class-Path: orientdb-server-1.0-SNAPSHOT.jar orientdb-client-1.0-SNAPS
- HOT.jar orientdb-enterprise-1.0-SNAPSHOT.jar orientdb-core-1.0-SNAPSH
- OT.jar orientdb-tools-1.0-SNAPSHOT.jar orient-commons-1.0-SNAPSHOT.ja
+Implementation-Version: 1.0.vivo_2
+Class-Path: orientdb-server-1.0.vivo_2.jar orientdb-client-1.0-SNAPS
+ HOT.jar orientdb-enterprise-1.0.vivo_2.jar orientdb-core-1.0-SNAPSH
+ OT.jar orientdb-tools-1.0.vivo_2.jar orient-commons-1.0.vivo_2.ja
  r persistence-api-1.0.jar blueprints-orient-graph-1.3-SNAPSHOT.jar bl
  ueprints-core-1.3-SNAPSHOT.jar jettison-1.3.jar stax-api-1.0.1.jar ja
  ckson-jaxrs-1.8.5.jar jackson-core-asl-1.8.5.jar jackson-mapper-asl-1
@@ -312,6 +312,6 @@ Import-Package: com.orientechnologies.common.concur.lock,com.orientech
  rientechnologies.orient.enterprise.channel.text,com.orientechnologies
  .orient.enterprise.command,javax.crypto,javax.management,javax.xml.bi
  nd,javax.xml.bind.annotation,javax.xml.validation
-Specification-Version: 1.0-SNAPSHOT
+Specification-Version: 1.0.vivo_2
 Main-Class: com.orientechnologies.orient.server.OServerMain
 
